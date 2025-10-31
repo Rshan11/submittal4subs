@@ -203,25 +203,33 @@ async function analyzeDocument() {
         return;
     }
 
-    // Validate email
     const userEmail = userEmailInput.value.trim();
     if (!userEmail || !userEmail.includes('@')) {
         showError('Please enter a valid email address');
         return;
     }
 
-    // Show loading
     showSection('loading');
-    updateLoadingStatus('Extracting text from PDF...');
+    updateLoadingStatus('Extracting table of contents...');
 
     try {
-        // Extract text from PDF
-        const text = await extractPDFText(currentFile);
+        // Step 1: Extract TOC only
+        const { tocText, totalPages, pdfData } = await extractPDFText(currentFile);
         
-        updateLoadingStatus('Analyzing spec structure...');
+        updateLoadingStatus('Identifying relevant sections with AI...');
         
-        // Use new multi-pass analysis endpoint with Supabase Edge Function
-        const analysis = await analyzeWithMultiPass(text, selectedTrade, userEmail, currentFile.name);
+        // Step 2: Send TOC to Edge Function to identify relevant pages
+        const pageRanges = await identifyRelevantSections(tocText, totalPages, selectedTrade);
+        
+        updateLoadingStatus(`Extracting ${pageRanges.length} relevant sections...`);
+        
+        // Step 3: Extract only the relevant pages
+        const relevantText = await extractSpecificPages(pdfData, pageRanges);
+        
+        updateLoadingStatus('Analyzing specifications...');
+        
+        // Step 4: Analyze the relevant sections
+        const analysis = await analyzeWithMultiPass(relevantText, selectedTrade, userEmail, currentFile.name);
         
         analysisResult = analysis;
         displayResults(analysis);
@@ -232,27 +240,89 @@ async function analyzeDocument() {
 }
 
 async function extractPDFText(file) {
-    // Extract PDF text client-side using PDF.js
     try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         
-        let fullText = '';
+        // Extract first 30 pages for TOC analysis
+        const tocPages = Math.min(30, pdf.numPages);
+        let tocText = '';
         
-        // Extract text from each page
-        for (let i = 1; i <= pdf.numPages; i++) {
+        console.log(`Extracting TOC (first ${tocPages} pages of ${pdf.numPages} total)`);
+        
+        for (let i = 1; i <= tocPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
-            fullText += pageText + '\n\n';
+            tocText += `\n--- PAGE ${i} ---\n${pageText}`;
         }
         
-        console.log(`PDF extracted: ${pdf.numPages} pages`);
-        return fullText;
+        return {
+            tocText,
+            totalPages: pdf.numPages,
+            // Store arrayBuffer for later extraction
+            pdfData: arrayBuffer
+        };
     } catch (error) {
         console.error('PDF extraction error:', error);
         throw new Error('Failed to extract text from PDF. Please ensure it\'s a valid PDF file.');
     }
+}
+
+async function extractSpecificPages(pdfData, pageRanges) {
+    try {
+        const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+        let extractedText = '';
+        
+        console.log('Extracting specific page ranges:', pageRanges);
+        
+        for (const range of pageRanges) {
+            const [start, end] = range.split('-').map(n => parseInt(n.trim()));
+            
+            console.log(`Extracting pages ${start}-${end}`);
+            
+            for (let i = start; i <= Math.min(end, pdf.numPages); i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                extractedText += `\n--- PAGE ${i} ---\n${pageText}\n`;
+            }
+        }
+        
+        console.log(`Extracted ${extractedText.length} characters from specific pages`);
+        return extractedText;
+    } catch (error) {
+        console.error('Page extraction error:', error);
+        throw new Error('Failed to extract specific pages from PDF');
+    }
+}
+
+async function identifyRelevantSections(tocText, totalPages, trade) {
+    // Call Edge Function to identify relevant page ranges
+    const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/identify-sections`,
+        {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                tocText,
+                totalPages,
+                trade
+            })
+        }
+    );
+
+    if (!response.ok) {
+        // Fallback: if new endpoint doesn't exist yet, return default ranges
+        console.warn('Section identification endpoint not available, using fallback');
+        return ['1-50']; // Extract first 50 pages as fallback
+    }
+
+    const data = await response.json();
+    return data.pageRanges; // Array like ["45-67", "234-256"]
 }
 
 
@@ -311,43 +381,36 @@ function displayMultiPassResults(analysis) {
     }
     
     // Show structure info
-    html += `
-        <div class="structure-info">
-            <h3>📋 Spec Structure Detected</h3>
-            <p><strong>Total Pages:</strong> ${analysis.structure.estimatedPages}</p>
-            <p><strong>Divisions Found:</strong> ${analysis.structure.divisionsFound.length}</p>
-            <p><strong>Confidence:</strong> ${analysis.confidence === 'high' ? '✅ High' : '⚠️ Low'}</p>
-            <details>
-                <summary>View Division Map</summary>
-                <ul>
-                    ${analysis.structure.divisionsFound.map(d => 
-                        `<li>Division ${d.number}: ${d.title} (${d.estimatedPages} pages)</li>`
-                    ).join('')}
-                </ul>
-            </details>
-        </div>
-    `;
+    html += '<div class="structure-info">';
+    html += '<h3>📋 Spec Structure Detected</h3>';
+    html += '<p><strong>Total Pages:</strong> ' + analysis.structure.estimatedPages + '</p>';
+    html += '<p><strong>Divisions Found:</strong> ' + analysis.structure.divisionsFound.length + '</p>';
+    html += '<p><strong>Confidence:</strong> ' + (analysis.confidence === 'high' ? '✅ High' : '⚠️ Low') + '</p>';
+    html += '<details>';
+    html += '<summary>View Division Map</summary>';
+    html += '<ul>';
+    analysis.structure.divisionsFound.forEach(d => {
+        html += '<li>Division ' + d.number + ': ' + d.title + ' (' + d.estimatedPages + ' pages)</li>';
+    });
+    html += '</ul>';
+    html += '</details>';
+    html += '</div>';
     
     // Create tabs for different sections
-    html += `
-        <div class="results-tabs">
-            <button class="tab active" onclick="showTab('security')">🔒 Security & Access</button>
-            <button class="tab" onclick="showTab('contract')">📄 Contract Terms</button>
-            <button class="tab" onclick="showTab('trade')">🔨 ${analysis.metadata.trade.charAt(0).toUpperCase() + analysis.metadata.trade.slice(1)} (Div ${analysis.metadata.division})</button>
-        </div>
-        
-        <div id="tab-security" class="tab-content active">
-            ${convertMarkdownToHTML(analysis.security)}
-        </div>
-        
-        <div id="tab-contract" class="tab-content">
-            ${convertMarkdownToHTML(analysis.contract)}
-        </div>
-        
-        <div id="tab-trade" class="tab-content">
-            ${convertMarkdownToHTML(analysis.tradeRequirements)}
-        </div>
-    `;
+    html += '<div class="results-tabs">';
+    html += '<button class="tab active" onclick="showTab(\'security\')">🔒 Security & Access</button>';
+    html += '<button class="tab" onclick="showTab(\'contract\')">📄 Contract Terms</button>';
+    html += '<button class="tab" onclick="showTab(\'trade\')">🔨 ' + analysis.metadata.trade.charAt(0).toUpperCase() + analysis.metadata.trade.slice(1) + ' (Div ' + analysis.metadata.division + ')</button>';
+    html += '</div>';
+    html += '<div id="tab-security" class="tab-content active">';
+    html += convertMarkdownToHTML(analysis.security);
+    html += '</div>';
+    html += '<div id="tab-contract" class="tab-content">';
+    html += convertMarkdownToHTML(analysis.contract);
+    html += '</div>';
+    html += '<div id="tab-trade" class="tab-content">';
+    html += convertMarkdownToHTML(analysis.tradeRequirements);
+    html += '</div>';
     
     resultsContent.innerHTML = html;
     showSection('results');
