@@ -1,4 +1,8 @@
 // Main application logic for Spec Analyzer
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 let currentFile = null;
 let analysisResult = null;
@@ -228,56 +232,29 @@ async function analyzeDocument() {
 }
 
 async function extractPDFText(file) {
-    // Send PDF to server for extraction
-    const formData = new FormData();
-    formData.append('pdf', file);
-
-    const response = await fetch('http://localhost:3001/api/extract-pdf', {
-        method: 'POST',
-        body: formData
-    });
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to extract PDF text');
+    // Extract PDF text client-side using PDF.js
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        let fullText = '';
+        
+        // Extract text from each page
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + '\n\n';
+        }
+        
+        console.log(`PDF extracted: ${pdf.numPages} pages`);
+        return fullText;
+    } catch (error) {
+        console.error('PDF extraction error:', error);
+        throw new Error('Failed to extract text from PDF. Please ensure it\'s a valid PDF file.');
     }
-
-    const data = await response.json();
-    
-    if (!data.success) {
-        throw new Error(data.error || 'PDF extraction failed');
-    }
-
-    console.log('PDF extracted:', data.metadata);
-    return data.text;
 }
 
-async function analyzeWithClaude(text, filename) {
-    // Call backend API endpoint instead of Anthropic directly
-    const response = await fetch('http://localhost:3001/api/analyze', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            text: text,
-            filename: filename
-        })
-    });
-
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Analysis failed');
-    }
-
-    const data = await response.json();
-    
-    if (!data.success) {
-        throw new Error(data.error || 'Analysis failed');
-    }
-
-    return data.analysis;
-}
 
 async function analyzeWithMultiPass(text, trade, userEmail, filename) {
     // Call Supabase Edge Function
