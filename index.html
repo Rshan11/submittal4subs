@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM4Subs Spec Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Free Beta Banner -->
+        <div class="beta-banner">
+            🎉 FREE BETA - No credit card required
+        </div>
+        
+        <header>
+            <h1>🔨 PM4Subs Spec Analyzer</h1>
+            <p>Upload construction specifications to automatically extract requirements, identify gaps, and generate RFI questions</p>
+        </header>
+
+        <main>
+            <!-- Trade Selection Section -->
+            <section class="trade-section" id="tradeSection">
+                <h2>What trade are you bidding?</h2>
+                <p>Select your trade to get targeted analysis and coordination requirements</p>
+                
+                <select id="tradeSelect" class="trade-select">
+                    <option value="">Select your trade...</option>
+                    <option value="masonry">Masonry (Division 04)</option>
+                    <option value="concrete">Concrete (Division 03)</option>
+                    <option value="steel">Structural Steel (Division 05)</option>
+                    <option value="carpentry">Carpentry (Division 06)</option>
+                    <option value="waterproofing">Waterproofing (Division 07)</option>
+                    <option value="doors-windows">Doors & Windows (Division 08)</option>
+                    <option value="drywall">Drywall (Division 09)</option>
+                    <option value="roofing">Roofing (Division 07)</option>
+                    <option value="hvac">HVAC (Division 23)</option>
+                    <option value="plumbing">Plumbing (Division 22)</option>
+                    <option value="electrical">Electrical (Division 26)</option>
+                    <option value="sitework">Sitework (Division 31)</option>
+                    <option value="other">Other...</option>
+                </select>
+                
+                <div id="tradeDescription" class="trade-description"></div>
+            </section>
+
+            <!-- Upload Section -->
+            <section class="upload-section" id="uploadSection" style="opacity: 0.5; pointer-events: none;">
+                <!-- Email Input -->
+                <div class="email-input-box">
+                    <label for="userEmail">Your Email (for receiving analysis)</label>
+                    <input type="email" id="userEmail" placeholder="your.email@company.com" required>
+                </div>
+                
+                <div class="upload-box" id="uploadBox">
+                    <div class="upload-icon">📄</div>
+                    <h2>Drop Spec PDF Here</h2>
+                    <p>or click to browse</p>
+                    <input type="file" id="fileInput" accept=".pdf" hidden>
+                </div>
+                
+                <div class="file-info" id="fileInfo" style="display: none;">
+                    <div class="file-details">
+                        <span id="fileName"></span>
+                        <span id="fileSize"></span>
+                    </div>
+                    <button class="btn btn-primary" id="analyzeBtn">Analyze Specification</button>
+                    <button class="btn btn-secondary" id="clearBtn">Clear</button>
+                </div>
+            </section>
+
+            <!-- Loading Section -->
+            <section class="loading-section" id="loadingSection" style="display: none;">
+                <div class="loading-spinner"></div>
+                <h2>Analyzing Specification...</h2>
+                <p id="loadingStatus">Extracting text from PDF...</p>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <div class="results-header">
+                    <h2>Analysis Complete</h2>
+                    <div class="results-actions">
+                        <button class="btn btn-secondary" id="downloadBtn">📥 Download Report</button>
+                        <button class="btn btn-secondary" id="newAnalysisBtn">🔄 New Analysis</button>
+                    </div>
+                </div>
+                
+                <div class="results-content" id="resultsContent">
+                    <!-- Analysis results will be inserted here -->
+                </div>
+            </section>
+
+            <!-- Error Section -->
+            <section class="error-section" id="errorSection" style="display: none;">
+                <div class="error-box">
+                    <h2>⚠️ Error</h2>
+                    <p id="errorMessage"></p>
+                    <button class="btn btn-primary" id="tryAgainBtn">Try Again</button>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>PM4Subs © 2025 | Local Development Version</p>
+        </footer>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
