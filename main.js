@@ -335,6 +335,7 @@ async function analyzeWithMultiPass(text, trade, userEmail, filename) {
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec`,
         {
             method: 'POST',
+            signal: AbortSignal.timeout(180000), // 3 minute timeout
             headers: {
                 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
                 'Content-Type': 'application/json'
