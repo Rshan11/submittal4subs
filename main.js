@@ -359,7 +359,7 @@ async function analyzeWithMultiPass(text, trade, userEmail, filename) {
 
 function displayResults(analysis) {
     // Check if this is new multi-pass format or old format
-    if (analysis.security && analysis.contract && analysis.tradeRequirements) {
+    if (analysis.security && analysis.tradeRequirements && analysis.contract) {
         displayMultiPassResults(analysis);
     } else {
         // Legacy format
@@ -401,24 +401,39 @@ function displayMultiPassResults(analysis) {
     
     // Create tabs for different sections
     html += '<div class="results-tabs">';
-    html += '<button class="tab active" onclick="showTab(\'security\')">🔒 Security & Access</button>';
-    html += '<button class="tab" onclick="showTab(\'contract\')">📄 Contract Terms</button>';
-    html += '<button class="tab" onclick="showTab(\'trade\')">🔨 ' + analysis.metadata.trade.charAt(0).toUpperCase() + analysis.metadata.trade.slice(1) + ' (Div ' + analysis.metadata.division + ')</button>';
+    html += '<button class="tab active" onclick="showTab(\'contract\')">📄 Contract</button>';
+    html += '<button class="tab" onclick="showTab(\'security\')">🔒 Security</button>';
+    html += '<button class="tab" onclick="showTab(\'trade\')">🔨 Trade Requirements</button>';
+    html += '<button class="tab" onclick="showTab(\'coordination\')">🤝 Coordination</button>';
+    html += '<button class="tab" onclick="showTab(\'changeorders\')">💰 Change Orders</button>';
     html += '</div>';
     
     // Extract text content from response objects before converting to HTML
-    const securityText = typeof analysis.security === 'string' ? analysis.security : (analysis.security?.text || JSON.stringify(analysis.security));
-    const contractText = typeof analysis.contract === 'string' ? analysis.contract : (analysis.contract?.text || JSON.stringify(analysis.contract));
-    const tradeText = typeof analysis.tradeRequirements === 'string' ? analysis.tradeRequirements : (analysis.tradeRequirements?.text || JSON.stringify(analysis.tradeRequirements));
+    const contractText = typeof analysis.contract === 'string' ? analysis.contract : '';
+    const securityText = typeof analysis.security === 'string' ? analysis.security : '';
+    const tradeText = typeof analysis.tradeRequirements === 'string' ? analysis.tradeRequirements : '';
+    const coordText = typeof analysis.coordination === 'string' ? analysis.coordination : '';
+    const coText = typeof analysis.changeOrders === 'string' ? analysis.changeOrders : '';
     
-    html += '<div id="tab-security" class="tab-content active">';
-    html += convertMarkdownToHTML(securityText);
-    html += '</div>';
-    html += '<div id="tab-contract" class="tab-content">';
+    html += '<div id="tab-contract" class="tab-content active">';
     html += convertMarkdownToHTML(contractText);
     html += '</div>';
+    
+    html += '<div id="tab-security" class="tab-content">';
+    html += convertMarkdownToHTML(securityText);
+    html += '</div>';
+    
     html += '<div id="tab-trade" class="tab-content">';
     html += convertMarkdownToHTML(tradeText);
+    html += '</div>';
+    
+    html += '<div id="tab-coordination" class="tab-content">';
+    html += convertMarkdownToHTML(coordText);
+    html += '</div>';
+    
+    html += '<div id="tab-changeorders" class="tab-content">';
+    html += '<div style="background: #fff3cd; padding: 10px; margin-bottom: 15px; border-radius: 5px;">⚠️ <strong>Change Order Opportunities</strong> - Use ethically for scope clarification only.</div>';
+    html += convertMarkdownToHTML(coText);
     html += '</div>';
     
     resultsContent.innerHTML = html;
