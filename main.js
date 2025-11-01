@@ -481,7 +481,32 @@ function convertMarkdownToHTML(markdown) {
 function downloadReport() {
     if (!analysisResult) return;
 
-    const blob = new Blob([analysisResult], { type: 'text/markdown' });
+    // Format the analysis as readable markdown
+    let markdown = '# PM4Subs Spec Analysis Report\n\n';
+    markdown += `**Trade:** ${analysisResult.metadata?.trade || 'Unknown'}\n`;
+    markdown += `**Generated:** ${new Date().toLocaleString()}\n\n`;
+    markdown += '---\n\n';
+    
+    markdown += '## Contract & Bidding Requirements\n\n';
+    markdown += analysisResult.contract || 'No contract requirements found.\n\n';
+    
+    markdown += '\n\n---\n\n';
+    markdown += '## Security & Access Requirements\n\n';
+    markdown += analysisResult.security || 'No security requirements found.\n\n';
+    
+    markdown += '\n\n---\n\n';
+    markdown += '## Trade Requirements\n\n';
+    markdown += analysisResult.tradeRequirements || 'No trade requirements found.\n\n';
+    
+    markdown += '\n\n---\n\n';
+    markdown += '## Coordination Requirements\n\n';
+    markdown += analysisResult.coordination || 'No coordination requirements found.\n\n';
+    
+    markdown += '\n\n---\n\n';
+    markdown += '## Change Order Opportunities\n\n';
+    markdown += analysisResult.changeOrders || 'No change order opportunities identified.\n\n';
+
+    const blob = new Blob([markdown], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
