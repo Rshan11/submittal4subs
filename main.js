@@ -405,14 +405,20 @@ function displayMultiPassResults(analysis) {
     html += '<button class="tab" onclick="showTab(\'contract\')">📄 Contract Terms</button>';
     html += '<button class="tab" onclick="showTab(\'trade\')">🔨 ' + analysis.metadata.trade.charAt(0).toUpperCase() + analysis.metadata.trade.slice(1) + ' (Div ' + analysis.metadata.division + ')</button>';
     html += '</div>';
+    
+    // Extract text content from response objects before converting to HTML
+    const securityText = typeof analysis.security === 'string' ? analysis.security : (analysis.security?.text || JSON.stringify(analysis.security));
+    const contractText = typeof analysis.contract === 'string' ? analysis.contract : (analysis.contract?.text || JSON.stringify(analysis.contract));
+    const tradeText = typeof analysis.tradeRequirements === 'string' ? analysis.tradeRequirements : (analysis.tradeRequirements?.text || JSON.stringify(analysis.tradeRequirements));
+    
     html += '<div id="tab-security" class="tab-content active">';
-    html += convertMarkdownToHTML(analysis.security);
+    html += convertMarkdownToHTML(securityText);
     html += '</div>';
     html += '<div id="tab-contract" class="tab-content">';
-    html += convertMarkdownToHTML(analysis.contract);
+    html += convertMarkdownToHTML(contractText);
     html += '</div>';
     html += '<div id="tab-trade" class="tab-content">';
-    html += convertMarkdownToHTML(analysis.tradeRequirements);
+    html += convertMarkdownToHTML(tradeText);
     html += '</div>';
     
     resultsContent.innerHTML = html;
