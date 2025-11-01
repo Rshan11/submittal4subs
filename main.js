@@ -242,6 +242,9 @@ async function analyzeDocument() {
 async function extractPDFText(file) {
     try {
         const arrayBuffer = await file.arrayBuffer();
+        // Create a copy to prevent ArrayBuffer detachment
+        const arrayBufferCopy = arrayBuffer.slice(0);
+        
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         
         // Extract first 30 pages for TOC analysis
@@ -260,8 +263,8 @@ async function extractPDFText(file) {
         return {
             tocText,
             totalPages: pdf.numPages,
-            // Store arrayBuffer for later extraction
-            pdfData: arrayBuffer
+            // Store cloned arrayBuffer for later extraction (prevents detachment)
+            pdfData: arrayBufferCopy
         };
     } catch (error) {
         console.error('PDF extraction error:', error);
