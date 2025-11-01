@@ -360,7 +360,7 @@ async function analyzeWithMultiPass(text, trade, userEmail, filename) {
 
 function displayResults(analysis) {
     // Check if this is new multi-pass format or old format
-    if (analysis.security && analysis.tradeRequirements && analysis.contract) {
+    if (analysis.contract && analysis.security && analysis.tradeRequirements) {
         displayMultiPassResults(analysis);
     } else {
         // Legacy format
@@ -384,21 +384,11 @@ function displayMultiPassResults(analysis) {
         html += '</div>';
     }
     
-    // Show structure info
-    html += '<div class="structure-info">';
-    html += '<h3>📋 Spec Structure Detected</h3>';
-    html += '<p><strong>Total Pages:</strong> ' + analysis.structure.estimatedPages + '</p>';
-    html += '<p><strong>Divisions Found:</strong> ' + analysis.structure.divisionsFound.length + '</p>';
-    html += '<p><strong>Confidence:</strong> ' + (analysis.confidence === 'high' ? '✅ High' : '⚠️ Low') + '</p>';
-    html += '<details>';
-    html += '<summary>View Division Map</summary>';
-    html += '<ul>';
-    analysis.structure.divisionsFound.forEach(d => {
-        html += '<li>Division ' + d.number + ': ' + d.title + ' (' + d.estimatedPages + ' pages)</li>';
-    });
-    html += '</ul>';
-    html += '</details>';
-    html += '</div>';
+    // Structure info section removed - Edge Function returns metadata not structure
+    // The following section tried to access analysis.structure which doesn't exist:
+    // - analysis.structure.estimatedPages
+    // - analysis.structure.divisionsFound
+    // - analysis.confidence
     
     // Create tabs for different sections
     html += '<div class="results-tabs">';
