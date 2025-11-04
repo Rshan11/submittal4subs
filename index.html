@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PM4Subs Spec Analyzer</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -74,6 +75,12 @@
                 <div class="loading-spinner"></div>
                 <h2>Analyzing Specification...</h2>
                 <p id="loadingStatus">Extracting text from PDF...</p>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                    <p id="progressText" class="progress-text">Estimated time: 2-3 minutes</p>
+                </div>
             </section>
 
             <!-- Results Section -->
@@ -81,7 +88,8 @@
                 <div class="results-header">
                     <h2>Analysis Complete</h2>
                     <div class="results-actions">
-                        <button class="btn btn-secondary" id="downloadBtn">📥 Download Report</button>
+                        <button class="btn btn-primary" id="downloadPdfBtn">📄 Download PDF Report</button>
+                        <button class="btn btn-secondary" id="downloadBtn">📥 Download Markdown</button>
                         <button class="btn btn-secondary" id="newAnalysisBtn">🔄 New Analysis</button>
                     </div>
                 </div>
@@ -106,6 +114,10 @@
         </footer>
     </div>
 
+    <!-- PDF Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
     <script type="module" src="/main.js"></script>
 </body>
 </html>
