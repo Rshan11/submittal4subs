@@ -6,6 +6,7 @@ export default defineConfig({
     open: false // Don't auto-open browser
   },
   build: {
+    target: 'es2022', // Support top-level await
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
