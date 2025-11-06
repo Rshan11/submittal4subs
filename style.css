@@ -23,6 +23,87 @@ body {
     line-height: 1.6;
 }
 
+/* Navigation Header - For Upload Page */
+.top-nav-bar {
+    background: #1f2937;
+    padding: 16px 40px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.nav-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-left .logo-link {
+    color: white;
+    text-decoration: none;
+    font-size: 20px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: opacity 0.2s;
+}
+
+.nav-left .logo-link:hover {
+    opacity: 0.9;
+}
+
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.nav-link-back {
+    color: white;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+    transition: opacity 0.2s;
+}
+
+.nav-link-back:hover {
+    opacity: 0.8;
+}
+
+.nav-user-email {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+}
+
+.btn-nav-logout {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-nav-logout:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Adjust container for nav */
+body:has(.top-nav-bar) {
+    padding: 0;
+}
+
+body:has(.top-nav-bar) .container {
+    padding-top: 2rem;
+}
+
 .container {
     max-width: 1200px;
     margin: 0 auto;
