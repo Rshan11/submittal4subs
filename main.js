@@ -386,7 +386,41 @@ async function analyzeDocument() {
         const result = await response.json();
         console.log('[UNIFIED] Analysis complete:', result.metadata);
         
-        // STEP 4: Format and display results
+        // STEP 4: Save analysis to database
+        if (jobId && currentUser) {
+            try {
+                updateLoadingStatus('Saving analysis...', 95);
+                const { data: savedAnalysis, error } = await supabase
+                    .from('spec_analyses')
+                    .insert({
+                        user_id: currentUser.id,
+                        job_id: jobId,
+                        file_name: currentFile.name,
+                        analysis_type: selectedTrade,
+                        status: 'completed',
+                        results: {
+                            contract: result.contract,
+                            division01: result.division01,
+                            materials: result.materials,
+                            coordination: result.coordination,
+                            metadata: result.metadata
+                        }
+                    })
+                    .select()
+                    .single();
+                
+                if (error) {
+                    console.error('Failed to save analysis:', error);
+                } else {
+                    console.log('Analysis saved:', savedAnalysis.id);
+                    window.currentAnalysisId = savedAnalysis.id;
+                }
+            } catch (err) {
+                console.error('Error saving analysis:', err);
+            }
+        }
+        
+        // STEP 5: Format and display results
         updateLoadingStatus('Complete!', 100);
         
         analysisResult = {
@@ -510,9 +544,33 @@ function formatContractForDisplay(contractObj) {
         text += '---\n\n';
     }
     
+    if (contractObj.security) {
+        text += '## 🔒 Security & Access Requirements\n\n';
+        text += `${contractObj.security}\n\n`;
+        text += '---\n\n';
+    }
+    
+    if (contractObj.labor) {
+        text += '## 👷 Labor Requirements\n\n';
+        text += `${contractObj.labor}\n\n`;
+        text += '---\n\n';
+    }
+    
+    if (contractObj.business) {
+        text += '## 🏢 Business Requirements\n\n';
+        text += `${contractObj.business}\n\n`;
+        text += '---\n\n';
+    }
+    
     if (contractObj.changeOrders) {
         text += '## 📝 Change Order Process\n\n';
         text += `${contractObj.changeOrders}\n\n`;
+        text += '---\n\n';
+    }
+    
+    if (contractObj.closeout) {
+        text += '## ✅ Project Closeout\n\n';
+        text += `${contractObj.closeout}\n\n`;
     }
     
     return text;

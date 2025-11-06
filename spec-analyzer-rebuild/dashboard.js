@@ -128,39 +128,18 @@ function renderJobsTable(jobs) {
         `
     }).join('')
 
-    // Add click handlers to job rows - Go to job analyses page
+    // Add click handlers to job rows
     document.querySelectorAll('.job-row').forEach(row => {
         row.addEventListener('click', function() {
             const jobId = this.getAttribute('data-job-id')
-            // Go to job analyses page to see all past analyses
-            window.location.href = `/job-analyses.html?job_id=${jobId}`
+            openAnalyzeModal(jobId)
         })
     })
 }
 
 // ============================================
-// EVENT LISTENERS (exposed via window)
+// EVENT LISTENERS
 // ============================================
-
-let selectedAnalysisType = null
-let selectedJobId = null
-
-window.openAnalyzeModal = function(jobId) {
-    selectedJobId = jobId
-    const analyzeModal = document.getElementById('analyzeModal')
-    analyzeModal.style.display = 'flex'
-    resetAnalysisSelection()
-}
-
-function resetAnalysisSelection() {
-    const analysisOptions = document.querySelectorAll('.analysis-option')
-    analysisOptions.forEach(opt => opt.classList.remove('selected'))
-    const customPromptContainer = document.getElementById('customPromptContainer')
-    const customPromptInput = document.getElementById('customPromptInput')
-    customPromptContainer.style.display = 'none'
-    customPromptInput.value = ''
-    selectedAnalysisType = null
-}
 
 function setupEventListeners() {
     // Modal elements
@@ -173,13 +152,19 @@ function setupEventListeners() {
     const newJobBtn = document.getElementById('newJobBtn')
     const analyzeBtn = document.getElementById('analyzeBtn')
     const createJobBtn = document.getElementById('createJobBtn')
-    const logoutBtn = document.getElementById('logoutBtn')
     
     // Form elements
     const analysisOptions = document.querySelectorAll('.analysis-option')
     const customPromptContainer = document.getElementById('customPromptContainer')
     const customPromptInput = document.getElementById('customPromptInput')
     const jobNameInput = document.getElementById('jobNameInput')
+    
+    // Profile button
+    const profileBtn = document.getElementById('profileBtn')
+
+    // State
+    let selectedAnalysisType = null
+    let selectedJobId = null
 
     // New Job Modal
     newJobBtn.addEventListener('click', () => {
@@ -201,6 +186,12 @@ function setupEventListeners() {
     })
 
     // Analyze Modal
+    function openAnalyzeModal(jobId) {
+        selectedJobId = jobId
+        analyzeModal.style.display = 'flex'
+        resetAnalysisSelection()
+    }
+
     function closeAnalyzeModal() {
         analyzeModal.style.display = 'none'
         resetAnalysisSelection()
@@ -228,6 +219,13 @@ function setupEventListeners() {
             }
         })
     })
+
+    function resetAnalysisSelection() {
+        analysisOptions.forEach(opt => opt.classList.remove('selected'))
+        customPromptContainer.style.display = 'none'
+        customPromptInput.value = ''
+        selectedAnalysisType = null
+    }
 
     // Create Job
     createJobBtn.addEventListener('click', async () => {
@@ -287,14 +285,12 @@ function setupEventListeners() {
         window.location.href = `/upload.html?${params.toString()}`
     })
 
-    // Logout button
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', async () => {
-            if (confirm('Are you sure you want to logout?')) {
-                await signOut()
-            }
-        })
-    }
+    // Profile dropdown (logout)
+    profileBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to logout?')) {
+            await signOut()
+        }
+    })
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {

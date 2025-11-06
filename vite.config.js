@@ -14,7 +14,9 @@ export default defineConfig({
         main: 'index.html',
         login: 'login.html',
         dashboard: 'dashboard.html',
-        upload: 'upload.html'
+        upload: 'upload.html',
+        jobAnalyses: 'job-analyses.html',
+        viewAnalysis: 'view-analysis.html'
       }
     }
   }

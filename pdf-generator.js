@@ -1,466 +1,544 @@
+// Professional PDF Generator for PM4Subs - UPDATED VERSION
+import { jsPDF } from 'jspdf';
+
 /**
- * Frontend PDF Generation using jsPDF + html2canvas
- * Professional PDF reports with cover page, RFI questions, and color-coded analysis
- * 
- * Dependencies:
- * - jsPDF: https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
- * - html2canvas: https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
+ * Generate and download a professional PDF report
+ * @param {Object} analysisData - The unified analysis data
  */
-
 export async function generateAndDownloadPDF(analysisData) {
-  const {
-    projectName,
-    companyName,
-    trade,
-    filename,
-    analyzedDate,
-    contractAnalysis,
-    tradeAnalysis,
-    coordinationAnalysis,
-    userEmail
-  } = analysisData;
+    const doc = new jsPDF();
+    const margin = 15;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const contentWidth = pageWidth - (margin * 2);
+    let yPos = margin;
 
-  console.log('[PDF] Starting generation...');
+    // Page counter
+    let pageNumber = 1;
 
-  // Create hidden container for rendering
-  const container = document.createElement('div');
-  container.id = 'pdf-render-container';
-  container.style.cssText = `
-    position: absolute;
-    left: -9999px;
-    top: 0;
-    width: 8.5in;
-    background: white;
-    padding: 0.5in;
-    font-family: 'Segoe UI', sans-serif;
-  `;
-  
-  // Generate HTML content
-  container.innerHTML = generatePDFHTML(analysisData);
-  document.body.appendChild(container);
-
-  try {
-    // Initialize jsPDF
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF('p', 'in', 'letter');
-    
-    // Get all pages
-    const pages = container.querySelectorAll('.pdf-page');
-    
-    for (let i = 0; i < pages.length; i++) {
-      console.log(`[PDF] Rendering page ${i + 1} of ${pages.length}...`);
-      
-      if (i > 0) {
-        pdf.addPage();
-      }
-      
-      // Render page to canvas
-      const canvas = await html2canvas(pages[i], {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-      
-      // Add to PDF
-      const imgData = canvas.toDataURL('image/png');
-      const imgWidth = 8.5;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+    // Helper: Add page footer
+    function addFooter() {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setFontSize(8);
+        doc.setTextColor(128, 128, 128);
+        doc.text(
+            `PM4Subs Specification Analysis - Page ${pageNumber}`,
+            pageWidth / 2,
+            pageHeight - 10,
+            { align: 'center' }
+        );
+        pageNumber++;
     }
-    
-    // Generate filename
-    const safeProjectName = (projectName || 'Project').replace(/[^a-z0-9]/gi, '_');
-    const pdfFilename = `${safeProjectName}_${trade}_Analysis_${new Date().toISOString().split('T')[0]}.pdf`;
-    
-    // Save PDF
-    pdf.save(pdfFilename);
-    
-    console.log('[PDF] Generated successfully:', pdfFilename);
-    
-    // Clean up
-    document.body.removeChild(container);
-    
-    return {
-      success: true,
-      filename: pdfFilename
-    };
-    
-  } catch (error) {
-    console.error('[PDF ERROR]', error);
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
+
+    // Helper: Check if we need a new page
+    function checkNewPage(requiredSpace = 20) {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        if (yPos + requiredSpace > pageHeight - 20) {
+            addFooter();
+            doc.addPage();
+            yPos = margin;
+            return true;
+        }
+        return false;
     }
-    throw error;
-  }
-}
 
-function generatePDFHTML(analysisData) {
-  const {
-    projectName,
-    companyName,
-    trade,
-    filename,
-    analyzedDate,
-    contractAnalysis,
-    tradeAnalysis,
-    coordinationAnalysis,
-    userEmail
-  } = analysisData;
-
-  const rfiQuestions = extractRFIQuestions(contractAnalysis, tradeAnalysis, coordinationAnalysis);
-
-  return `
-    <style>
-      .pdf-page {
-        width: 8.5in;
-        min-height: 11in;
-        background: white;
-        padding: 0.5in;
-        box-sizing: border-box;
-        page-break-after: always;
-        font-family: 'Segoe UI', Tahoma, sans-serif;
-        font-size: 11pt;
-        line-height: 1.6;
-        color: #333;
-      }
-      
-      .pdf-header {
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 3px solid #2563eb;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
-      }
-      
-      .pdf-logo {
-        font-size: 20pt;
-        font-weight: bold;
-        color: #2563eb;
-      }
-      
-      .pdf-header-right {
-        text-align: right;
-        font-size: 9pt;
-        color: #666;
-      }
-      
-      .pdf-cover {
-        text-align: center;
-        padding-top: 1.5in;
-      }
-      
-      .pdf-cover h1 {
-        font-size: 28pt;
-        color: #1e40af;
-        margin-bottom: 0.5in;
-      }
-      
-      .pdf-risk-summary {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 15px;
-        margin: 30px 0;
-      }
-      
-      .pdf-risk-box {
-        padding: 20px;
-        border-radius: 8px;
-        text-align: center;
-      }
-      
-      .pdf-risk-box.high {
-        background: #fee2e2;
-        border: 2px solid #dc2626;
-      }
-      
-      .pdf-risk-box.medium {
-        background: #fef3c7;
-        border: 2px solid #f59e0b;
-      }
-      
-      .pdf-risk-box.low {
-        background: #d1fae5;
-        border: 2px solid #10b981;
-      }
-      
-      .pdf-risk-count {
-        font-size: 32pt;
-        font-weight: bold;
-        margin: 10px 0;
-      }
-      
-      .pdf-risk-box.high .pdf-risk-count { color: #dc2626; }
-      .pdf-risk-box.medium .pdf-risk-count { color: #f59e0b; }
-      .pdf-risk-box.low .pdf-risk-count { color: #10b981; }
-      
-      .pdf-h2 {
-        font-size: 18pt;
-        color: #1e40af;
-        margin: 20px 0 15px 0;
-        padding-bottom: 8px;
-        border-bottom: 2px solid #2563eb;
-      }
-      
-      .pdf-h3 {
-        font-size: 14pt;
-        color: #1e40af;
-        margin: 15px 0 10px 0;
-      }
-      
-      .pdf-rfi-box {
-        background: #f0f9ff;
-        border-left: 4px solid #2563eb;
-        padding: 15px;
-        margin: 15px 0;
-      }
-      
-      .pdf-rfi-question {
-        margin: 10px 0;
-        padding: 10px;
-        border-left: 3px solid #ccc;
-      }
-      
-      .pdf-content {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        font-size: 10pt;
-      }
-      
-      .risk-high { color: #dc2626; font-weight: bold; }
-      .risk-medium { color: #f59e0b; font-weight: bold; }
-      .risk-low { color: #10b981; }
-    </style>
-
-    <!-- COVER PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-cover">
-        <div class="pdf-logo">PM4Subs</div>
-        <h1>Specification Analysis Report</h1>
+    // Helper: Add section header
+    function addSectionHeader(title, icon = '') {
+        checkNewPage(30);
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(41, 128, 185); // Blue
+        doc.text(`${icon} ${title}`, margin, yPos);
+        yPos += 10;
         
-        <div style="font-size: 14pt; margin: 20px 0; color: #666;">
-          <div style="margin: 15px 0;"><strong>Project:</strong> ${projectName || 'Unnamed Project'}</div>
-          <div style="margin: 15px 0;"><strong>Company:</strong> ${companyName || 'N/A'}</div>
-          <div style="margin: 15px 0;"><strong>Trade:</strong> ${trade.toUpperCase()}</div>
-        </div>
+        // Underline
+        doc.setDrawColor(41, 128, 185);
+        doc.setLineWidth(0.5);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 8;
         
-        <div class="pdf-risk-summary">
-          <div class="pdf-risk-box high">
-            <div>🔴 High Risk</div>
-            <div class="pdf-risk-count">${rfiQuestions.filter(q => q.priority === 'high').length}</div>
-            <div>Critical items</div>
-          </div>
-          <div class="pdf-risk-box medium">
-            <div>🟡 Medium Risk</div>
-            <div class="pdf-risk-count">${rfiQuestions.filter(q => q.priority === 'medium').length}</div>
-            <div>To clarify</div>
-          </div>
-          <div class="pdf-risk-box low">
-            <div>🟢 Clear</div>
-            <div class="pdf-risk-count">${Math.max(0, 20 - rfiQuestions.length)}</div>
-            <div>Well-specified</div>
-          </div>
-        </div>
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+    }
+
+    // Helper: Add subsection header
+    function addSubsectionHeader(title) {
+        checkNewPage(15);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(52, 73, 94);
+        doc.text(title, margin, yPos);
+        yPos += 7;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+    }
+
+    // Helper: Add paragraph text
+    function addParagraph(text, indent = 0) {
+        if (!text || text === 'Not specified in provided text.' || text === 'Not explicitly defined in provided text.') {
+            doc.setFontSize(10);
+            doc.setTextColor(150, 150, 150);
+            doc.text('Not specified in available text', margin + indent, yPos);
+            yPos += 6;
+            doc.setTextColor(0, 0, 0);
+            return;
+        }
+
+        doc.setFontSize(10);
+        const lines = doc.splitTextToSize(text, contentWidth - indent);
         
-        <div style="margin-top: 1in; font-size: 10pt; color: #999;">
-          <div>Analyzed: ${new Date(analyzedDate).toLocaleDateString()}</div>
-          <div>Specification: ${filename}</div>
-          <div>Generated by PM4Subs</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- RFI QUESTIONS PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-header">
-        <div class="pdf-logo">PM4Subs</div>
-        <div class="pdf-header-right">
-          <div>${projectName}</div>
-          <div>RFI Questions</div>
-        </div>
-      </div>
-      
-      <div class="pdf-h2">🔍 RFI Questions & Clarifications</div>
-      
-      <div class="pdf-rfi-box">
-        <strong>Auto-generated questions from spec analysis.</strong> Review before submitting.
-      </div>
-      
-      ${generateRFIHTML(rfiQuestions)}
-    </div>
-
-    <!-- CONTRACT PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-header">
-        <div class="pdf-logo">PM4Subs</div>
-        <div class="pdf-header-right">
-          <div>${projectName}</div>
-          <div>Contract Terms</div>
-        </div>
-      </div>
-      
-      <div class="pdf-h2">📋 Contract & Payment (Division 00)</div>
-      <div class="pdf-content">${formatContent(contractAnalysis?.division00 || contractAnalysis?.contract)}</div>
-    </div>
-
-    <!-- REQUIREMENTS PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-header">
-        <div class="pdf-logo">PM4Subs</div>
-        <div class="pdf-header-right">
-          <div>${projectName}</div>
-          <div>General Requirements</div>
-        </div>
-      </div>
-      
-      <div class="pdf-h2">📝 General Requirements (Division 01)</div>
-      <div class="pdf-content">${formatContent(contractAnalysis?.division01)}</div>
-    </div>
-
-    <!-- TRADE PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-header">
-        <div class="pdf-logo">PM4Subs</div>
-        <div class="pdf-header-right">
-          <div>${projectName}</div>
-          <div>${trade.toUpperCase()} Requirements</div>
-        </div>
-      </div>
-      
-      <div class="pdf-h2">🔨 ${trade.toUpperCase()} Requirements</div>
-      <div class="pdf-content">${formatContent(tradeAnalysis?.requirements)}</div>
-    </div>
-
-    <!-- COORDINATION PAGE -->
-    <div class="pdf-page">
-      <div class="pdf-header">
-        <div class="pdf-logo">PM4Subs</div>
-        <div class="pdf-header-right">
-          <div>${projectName}</div>
-          <div>Coordination</div>
-        </div>
-      </div>
-      
-      <div class="pdf-h2">🔗 Coordination Requirements</div>
-      <div class="pdf-content">${formatContent(coordinationAnalysis?.coordination)}</div>
-      
-      <div style="margin-top: 2in; padding-top: 20px; border-top: 1px solid #ccc; text-align: center; font-size: 9pt; color: #999;">
-        <p>Generated by PM4Subs • ${new Date().toLocaleDateString()}</p>
-        <p>For ${companyName} • ${userEmail}</p>
-      </div>
-    </div>
-  `;
-}
-
-function extractRFIQuestions(contractAnalysis, tradeAnalysis, coordinationAnalysis) {
-  const questions = [];
-  
-  // Helper to clean text artifacts
-  function cleanQuestionText(text) {
-    return text
-      .replace(/🔴/g, '')
-      .replace(/🟡/g, '')
-      .replace(/[^\w\s,.:-]/g, '')           // Remove special chars except punctuation
-      .replace(/nn/g, 'n ')                  // Fix double n's
-      .replace(/([a-z])([A-Z])/g, '$1 $2')  // Add space between camelCase
-      .replace(/\s+/g, ' ')                  // Normalize whitespace
-      .trim()
-      .substring(0, 150);                    // Limit length
-  }
-  
-  // Extract high-priority (red flag) questions from all analyses
-  [contractAnalysis, tradeAnalysis, coordinationAnalysis].forEach((analysis, idx) => {
-    if (!analysis) return;
-    
-    const text = JSON.stringify(analysis);
-    const redFlags = text.match(/🔴[^🟡🟢]{15,200}/g) || [];
-    
-    redFlags.slice(0, 8).forEach((flag) => {
-      const cleanText = cleanQuestionText(flag);
-      if (cleanText.length > 20) {
-        questions.push({
-          number: questions.length + 1,
-          category: idx === 0 ? 'Contract' : idx === 1 ? 'Technical' : 'Coordination',
-          priority: 'high',
-          question: cleanText
+        lines.forEach((line) => {
+            checkNewPage(6);
+            doc.text(line, margin + indent, yPos);
+            yPos += 5;
         });
-      }
+        yPos += 2;
+    }
+
+    // Helper: Add bullet point
+    function addBullet(text) {
+        checkNewPage(10);
+        doc.setFontSize(10);
+        doc.circle(margin + 2, yPos - 2, 1, 'F');
+        
+        const lines = doc.splitTextToSize(text, contentWidth - 8);
+        lines.forEach((line, index) => {
+            if (index > 0) checkNewPage(5);
+            doc.text(line, margin + 6, yPos);
+            yPos += 5;
+        });
+        yPos += 1;
+    }
+
+    // Helper: Add colored risk indicator circle
+    function addRiskCircle(riskLevel, x, y) {
+        const colors = {
+            'green': [46, 204, 113],
+            'yellow': [241, 196, 15],
+            'red': [231, 76, 60]
+        };
+        
+        const color = colors[riskLevel] || [128, 128, 128];
+        doc.setFillColor(...color);
+        doc.circle(x, y, 2, 'F');
+    }
+
+    // Helper: Determine risk level from text
+    function getRiskLevel(text) {
+        if (!text) return 'yellow';
+        const upper = text.toUpperCase();
+        
+        if (upper.includes('COMPLETE SPECIFICATION') || 
+            upper.includes('MANUFACTURER AND MODEL') ||
+            text.includes('🟢')) {
+            return 'green';
+        } else if (upper.includes('NO PRODUCT SPECIFIED') ||
+                   upper.includes('MISSING') ||
+                   upper.includes('TBD') ||
+                   text.includes('🔴')) {
+            return 'red';
+        }
+        return 'yellow';
+    }
+
+    // ========================================
+    // COVER PAGE
+    // ========================================
+    doc.setFillColor(41, 128, 185);
+    doc.rect(0, 0, pageWidth, 80, 'F');
+    
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(28);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PM4Subs', pageWidth / 2, 35, { align: 'center' });
+    
+    doc.setFontSize(20);
+    doc.text('Specification Analysis Report', pageWidth / 2, 50, { align: 'center' });
+    
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
+    yPos = 100;
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Project:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(analysisData.projectName || 'Unknown Project', margin + 25, yPos);
+    yPos += 10;
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Trade:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(analysisData.trade?.toUpperCase() || 'UNKNOWN', margin + 25, yPos);
+    yPos += 10;
+    
+    doc.setFont('helvetica', 'bold');
+    doc.text('Analyzed:', margin, yPos);
+    doc.setFont('helvetica', 'normal');
+    doc.text(new Date().toLocaleDateString(), margin + 25, yPos);
+    yPos += 30;
+
+    // Risk Summary Box - Count from materials
+    const materials = analysisData.tradeAnalysis?.requirements || '';
+    
+    // Count by risk assessment text (more reliable than emoji)
+    const redCount = (materials.match(/Risk Assessment:.*?(missing|TBD|No product specified)/gi) || []).length;
+    const greenCount = (materials.match(/Risk Assessment:.*?(Complete specification|manufacturer and model)/gi) || []).length;
+    const yellowCount = (materials.match(/Risk Assessment:.*?Generic specification/gi) || []).length;
+    
+    doc.setFillColor(231, 76, 60);
+    doc.roundedRect(margin, yPos, 50, 40, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.text(redCount.toString(), margin + 25, yPos + 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('High Risk', margin + 25, yPos + 30, { align: 'center' });
+    
+    doc.setFillColor(241, 196, 15);
+    doc.roundedRect(margin + 60, yPos, 50, 40, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.text(yellowCount.toString(), margin + 85, yPos + 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('Medium Risk', margin + 85, yPos + 30, { align: 'center' });
+    
+    doc.setFillColor(46, 204, 113);
+    doc.roundedRect(margin + 120, yPos, 50, 40, 3, 3, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.text(greenCount.toString(), margin + 145, yPos + 20, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('Clear', margin + 145, yPos + 30, { align: 'center' });
+    
+    doc.setTextColor(0, 0, 0);
+    yPos += 50;
+    
+    // Quick summary
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Executive Summary:', margin, yPos);
+    yPos += 7;
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const totalItems = redCount + yellowCount + greenCount;
+    const summaryText = `${totalItems} items analyzed. ${redCount} items require immediate clarification (RFI). ${yellowCount} items need manufacturer verification. ${greenCount} items have complete specifications.`;
+    const summaryLines = doc.splitTextToSize(summaryText, contentWidth);
+    summaryLines.forEach(line => {
+        doc.text(line, margin, yPos);
+        yPos += 5;
     });
     
-    // Also extract medium-priority (yellow flag) questions
-    const yellowFlags = text.match(/🟡[^🔴🟢]{15,200}/g) || [];
-    yellowFlags.slice(0, 5).forEach((flag) => {
-      const cleanText = cleanQuestionText(flag);
-      if (cleanText.length > 20) {
-        questions.push({
-          number: questions.length + 1,
-          category: idx === 0 ? 'Contract' : idx === 1 ? 'Technical' : 'Coordination',
-          priority: 'medium',
-          question: cleanText
+    addFooter();
+
+    // ========================================
+    // CONTRACT TERMS PAGE (Division 00)
+    // ========================================
+    doc.addPage();
+    yPos = margin;
+    
+    addSectionHeader('Contract & Payment Terms', '📄');
+
+    const contract = analysisData.contractAnalysis?.division00 || {};
+
+    if (contract.payment) {
+        addSubsectionHeader('💰 Payment Terms');
+        addParagraph(contract.payment);
+        yPos += 5;
+    }
+
+    if (contract.retainage) {
+        addSubsectionHeader('📊 Retainage');
+        addParagraph(contract.retainage);
+        yPos += 5;
+    }
+
+    if (contract.bonding) {
+        addSubsectionHeader('🏛️ Bonding Requirements');
+        addParagraph(contract.bonding);
+        yPos += 5;
+    }
+
+    if (contract.insurance) {
+        addSubsectionHeader('🛡️ Insurance Requirements');
+        addParagraph(contract.insurance);
+        yPos += 5;
+    }
+
+    if (contract.damages) {
+        addSubsectionHeader('⚠️ Liquidated Damages');
+        addParagraph(contract.damages);
+        yPos += 5;
+    }
+
+    if (contract.changeOrders) {
+        addSubsectionHeader('📝 Change Order Process');
+        addParagraph(contract.changeOrders);
+    }
+
+    addFooter();
+
+    // ========================================
+    // GENERAL REQUIREMENTS PAGE (Division 01)
+    // ========================================
+    doc.addPage();
+    yPos = margin;
+    
+    addSectionHeader('General Requirements', '📋');
+
+    const div01 = analysisData.contractAnalysis?.division01 || {};
+
+    if (div01.submittals) {
+        addSubsectionHeader('📤 Submittal Procedures');
+        addParagraph(div01.submittals);
+        yPos += 5;
+    }
+
+    if (div01.testing) {
+        addSubsectionHeader('🔬 Testing & Inspection');
+        addParagraph(div01.testing);
+        yPos += 5;
+    }
+
+    if (div01.qualityControl) {
+        addSubsectionHeader('✅ Quality Control');
+        addParagraph(div01.qualityControl);
+        yPos += 5;
+    }
+
+    if (div01.siteLogistics) {
+        addSubsectionHeader('🚧 Site Logistics');
+        addParagraph(div01.siteLogistics);
+        yPos += 5;
+    }
+
+    if (div01.closeout) {
+        addSubsectionHeader('📁 Closeout Requirements');
+        addParagraph(div01.closeout);
+    }
+
+    // If Division 01 is empty, show note
+    if (!div01.submittals && !div01.testing && !div01.qualityControl && !div01.siteLogistics && !div01.closeout) {
+        doc.setFontSize(10);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Division 01 requirements not separately identified in analysis.', margin, yPos);
+        doc.text('Check contract documents for general requirements.', margin, yPos + 6);
+        doc.setTextColor(0, 0, 0);
+    }
+
+    addFooter();
+
+    // ========================================
+    // MATERIALS / TRADE REQUIREMENTS
+    // ========================================
+    doc.addPage();
+    yPos = margin;
+    
+    addSectionHeader('Material Requirements', '🔨');
+
+    // Parse materials from the formatted text
+    const materialSections = materials.split('---').filter(s => s.trim());
+    
+    materialSections.forEach((section, index) => {
+        if (index > 0) yPos += 3;
+        
+        // Extract item name
+        const nameMatch = section.match(/##\s*(.+?)(?:\s*[🟢🟡🔴]|\n)/);
+        
+        if (nameMatch) {
+            checkNewPage(25);
+            
+            // Determine risk level from content
+            const riskLevel = getRiskLevel(section);
+            
+            // Item name with colored risk indicator
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            
+            addRiskCircle(riskLevel, margin + 2, yPos - 2);
+            doc.setTextColor(0, 0, 0);
+            doc.text(nameMatch[1].trim(), margin + 8, yPos);
+            yPos += 7;
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            
+            // Extract and display fields
+            const specs = section.match(/\*\*Specifications:\*\*\s*(.+?)(?=\n\n|\*\*|$)/s);
+            const risk = section.match(/\*\*Risk Assessment:\*\*\s*(.+?)(?=\n\n|\*\*|$)/s);
+            const submittal = section.match(/\*\*Submittal Required:\*\*\s*(.+?)(?=\n\n|\*\*|$)/s);
+            const notes = section.match(/\*\*Notes:\*\*\s*(.+?)(?=\n\n|---|$)/s);
+            
+            if (specs) {
+                doc.setTextColor(52, 73, 94);
+                doc.text('Spec:', margin + 5, yPos);
+                doc.setTextColor(0, 0, 0);
+                addParagraph(specs[1].trim(), 20);
+            }
+            
+            if (risk) {
+                doc.setTextColor(52, 73, 94);
+                doc.text('Risk:', margin + 5, yPos);
+                doc.setTextColor(0, 0, 0);
+                addParagraph(risk[1].trim(), 20);
+            }
+            
+            if (submittal) {
+                doc.setTextColor(52, 73, 94);
+                doc.text('Submittal:', margin + 5, yPos);
+                doc.setTextColor(0, 0, 0);
+                addParagraph(submittal[1].trim(), 30);
+            }
+            
+            if (notes) {
+                doc.setTextColor(52, 73, 94);
+                doc.text('Notes:', margin + 5, yPos);
+                doc.setTextColor(0, 0, 0);
+                addParagraph(notes[1].trim(), 20);
+            }
+            
+            // Separator line
+            doc.setDrawColor(220, 220, 220);
+            doc.setLineWidth(0.3);
+            doc.line(margin, yPos, pageWidth - margin, yPos);
+            yPos += 5;
+        }
+    });
+
+    addFooter();
+
+    // ========================================
+    // COORDINATION REQUIREMENTS
+    // ========================================
+    doc.addPage();
+    yPos = margin;
+    
+    addSectionHeader('Coordination Requirements', '🤝');
+
+    const coordination = analysisData.coordinationAnalysis?.coordination || [];
+    
+    if (coordination.length === 0) {
+        addParagraph('No coordination requirements identified.');
+    } else {
+        coordination.forEach((item) => {
+            checkNewPage(12);
+            
+            // Handle both string and object formats
+            let text = '';
+            if (typeof item === 'string') {
+                text = item;
+            } else if (item && typeof item === 'object') {
+                const section = item.section || '';
+                const title = item.title || '';
+                const requirement = item.requirement || '';
+                text = `Section ${section}${title ? ' - ' + title : ''}: ${requirement}`;
+            }
+            
+            if (text) {
+                addBullet(text);
+            }
         });
-      }
-    });
-  });
-  
-  return questions.slice(0, 20); // Limit to top 20 questions
-}
+    }
 
-function generateRFIHTML(questions) {
-  if (questions.length === 0) {
-    return '<p>✅ No critical questions identified. All specifications appear complete.</p>';
-  }
-  
-  const high = questions.filter(q => q.priority === 'high');
-  const medium = questions.filter(q => q.priority === 'medium');
-  
-  let html = '';
-  
-  if (high.length > 0) {
-    html += '<div class="pdf-h3" style="color: #dc2626;">🔴 High Priority Questions</div>';
-    high.forEach(q => {
-      html += `
-        <div class="pdf-rfi-question" style="border-left-color: #dc2626;">
-          <div style="font-weight: bold; color: #2563eb;">RFI-${q.number.toString().padStart(3, '0')}</div>
-          <div><strong>${q.category}:</strong> ${q.question}</div>
-        </div>
-      `;
-    });
-  }
-  
-  if (medium.length > 0) {
-    html += '<div class="pdf-h3" style="color: #f59e0b; margin-top: 20px;">🟡 Medium Priority Questions</div>';
-    medium.forEach(q => {
-      html += `
-        <div class="pdf-rfi-question" style="border-left-color: #f59e0b;">
-          <div style="font-weight: bold; color: #2563eb;">RFI-${q.number.toString().padStart(3, '0')}</div>
-          <div><strong>${q.category}:</strong> ${q.question}</div>
-        </div>
-      `;
-    });
-  }
-  
-  return html;
-}
+    addFooter();
 
-function formatContent(content) {
-  if (!content) return 'No analysis available';
-  if (typeof content === 'object') {
-    content = JSON.stringify(content, null, 2);
-  }
-  
-  let formatted = String(content)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>')
-    .replace(/## (.*?)(<br>|$)/g, '<h3 style="font-size: 12pt; color: #1e40af; margin: 15px 0 8px 0;">$1</h3>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  
-  // Wrap risk indicator emoji in spans (use string replace to avoid regex emoji parsing issues)
-  formatted = formatted.split('🔴').join('<span class="risk-high">🔴</span>');
-  formatted = formatted.split('🟡').join('<span class="risk-medium">🟡</span>');
-  formatted = formatted.split('🟢').join('<span class="risk-low">🟢</span>');
-  
-  return formatted.substring(0, 8000); // Limit content per page to prevent rendering issues
+    // ========================================
+    // RFI QUESTIONS (Auto-generated from red items)
+    // ========================================
+    doc.addPage();
+    yPos = margin;
+    
+    addSectionHeader('Request for Information', '❓');
+
+    // Extract RFI questions from red-flagged items
+    const rfiQuestions = [];
+    let questionNumber = 1;
+    
+    materialSections.forEach(section => {
+        const nameMatch = section.match(/##\s*(.+?)(?:\s*[🟢🟡🔴]|\n)/);
+        const riskMatch = section.match(/\*\*Risk Assessment:\*\*\s*(.+?)(?=\n\n|\*\*|$)/s);
+        
+        if (nameMatch && riskMatch) {
+            const riskText = riskMatch[1].trim().toLowerCase();
+            
+            // If it's high risk (missing, TBD, no product specified)
+            if (riskText.includes('missing') || 
+                riskText.includes('tbd') || 
+                riskText.includes('no product specified') ||
+                riskText.includes('not specified')) {
+                
+                const itemName = nameMatch[1].trim();
+                rfiQuestions.push({
+                    number: questionNumber++,
+                    item: itemName,
+                    question: `Please provide complete specifications for ${itemName}, including manufacturer, model number, and all technical requirements.`
+                });
+            }
+        }
+    });
+
+    if (rfiQuestions.length === 0) {
+        doc.setFontSize(11);
+        doc.setTextColor(46, 204, 113);
+        doc.text('✓ No critical RFI questions identified', margin, yPos);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(10);
+        yPos += 8;
+        doc.text('All specifications appear to have sufficient detail for accurate bidding.', margin, yPos);
+    } else {
+        doc.setFontSize(10);
+        doc.setTextColor(231, 76, 60);
+        doc.text(`🔴 ${rfiQuestions.length} Critical Questions Requiring Clarification`, margin, yPos);
+        doc.setTextColor(0, 0, 0);
+        yPos += 10;
+        
+        rfiQuestions.forEach((rfi, index) => {
+            checkNewPage(20);
+            
+            // RFI number box
+            doc.setFillColor(231, 76, 60);
+            doc.roundedRect(margin, yPos - 4, 18, 8, 2, 2, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(9);
+            doc.text(`RFI-${rfi.number.toString().padStart(3, '0')}`, margin + 9, yPos + 1, { align: 'center' });
+            
+            // Question text
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            doc.text(rfi.item, margin + 22, yPos);
+            yPos += 6;
+            
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            const questionLines = doc.splitTextToSize(rfi.question, contentWidth - 10);
+            questionLines.forEach(line => {
+                checkNewPage(5);
+                doc.text(line, margin + 5, yPos);
+                yPos += 5;
+            });
+            
+            yPos += 5;
+            
+            // Separator
+            if (index < rfiQuestions.length - 1) {
+                doc.setDrawColor(220, 220, 220);
+                doc.setLineWidth(0.2);
+                doc.line(margin, yPos, pageWidth - margin, yPos);
+                yPos += 5;
+            }
+        });
+    }
+
+    addFooter();
+
+    // ========================================
+    // SAVE PDF
+    // ========================================
+    const trade = analysisData.trade || 'Unknown';
+    const date = new Date().toISOString().split('T')[0];
+    const projectName = analysisData.projectName.replace(/[^a-z0-9]/gi, '-');
+    const filename = `${projectName}-${trade}-Analysis-${date}.pdf`;
+    
+    doc.save(filename);
+    
+    console.log(`[PDF] Generated: ${filename}`);
 }

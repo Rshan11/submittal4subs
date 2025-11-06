@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Spec Analyzer</title>
+    <link rel="stylesheet" href="auth-style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1 class="brand">🔨 Spec Analyzer</h1>
+                <p class="tagline">Construction spec analysis made simple</p>
+            </div>
+
+            <div class="auth-tabs">
+                <button class="auth-tab active" data-tab="login">Sign In</button>
+                <button class="auth-tab" data-tab="signup">Sign Up</button>
+            </div>
+
+            <!-- Error/Success Messages -->
+            <div id="messageBox" class="message-box" style="display: none;"></div>
+
+            <!-- Login Form -->
+            <form id="loginForm" class="auth-form">
+                <div class="form-group">
+                    <label for="loginEmail">Email</label>
+                    <input 
+                        type="email" 
+                        id="loginEmail" 
+                        class="form-input" 
+                        placeholder="your.email@company.com"
+                        required 
+                        autocomplete="email"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input 
+                        type="password" 
+                        id="loginPassword" 
+                        class="form-input" 
+                        placeholder="••••••••"
+                        required
+                        autocomplete="current-password"
+                    />
+                </div>
+
+                <button type="submit" class="btn-submit" id="loginBtn">
+                    Sign In
+                </button>
+
+                <div class="form-footer">
+                    <a href="#" class="forgot-link">Forgot password?</a>
+                </div>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signupForm" class="auth-form" style="display: none;">
+                <div class="form-group">
+                    <label for="signupEmail">Email</label>
+                    <input 
+                        type="email" 
+                        id="signupEmail" 
+                        class="form-input" 
+                        placeholder="your.email@company.com"
+                        required
+                        autocomplete="email"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="signupPassword">Password</label>
+                    <input 
+                        type="password" 
+                        id="signupPassword" 
+                        class="form-input" 
+                        placeholder="••••••••"
+                        required
+                        autocomplete="new-password"
+                        minlength="6"
+                    />
+                </div>
+
+                <div class="form-group">
+                    <label for="signupPasswordConfirm">Confirm Password</label>
+                    <input 
+                        type="password" 
+                        id="signupPasswordConfirm" 
+                        class="form-input" 
+                        placeholder="••••••••"
+                        required
+                        autocomplete="new-password"
+                        minlength="6"
+                    />
+                </div>
+
+                <button type="submit" class="btn-submit" id="signupBtn">
+                    Create Account
+                </button>
+
+                <div class="form-footer">
+                    <p class="terms-text">
+                        By signing up, you agree to our Terms of Service
+                    </p>
+                </div>
+            </form>
+
+            <!-- Beta Badge -->
+            <div class="beta-badge">
+                🎉 FREE BETA - No credit card required
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/auth.js"></script>
+</body>
+</html>

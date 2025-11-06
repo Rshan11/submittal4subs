@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Analyses - Spec Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <header class="top-nav">
+        <div class="nav-container">
+            <div class="nav-left">
+                <a href="/dashboard.html" class="logo-link">
+                    🔨 <span>PM4Subs Spec Analyzer</span>
+                </a>
+            </div>
+            <div class="nav-right">
+                <a href="/dashboard.html" class="nav-link">← Back to Dashboard</a>
+                <span class="user-email" id="navUserEmail"></span>
+                <button class="btn-logout" id="navLogoutBtn">Sign Out</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container" style="max-width: 1200px; margin: 40px auto; padding: 0 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <div>
+                <h1 id="jobName" style="margin: 0 0 10px 0;">Loading...</h1>
+                <p id="jobDetails" style="color: #666; margin: 0;">Past analyses for this job</p>
+            </div>
+            <button id="newAnalysisBtn" class="btn-primary">
+                + New Analysis
+            </button>
+        </div>
+
+        <!-- Analyses List -->
+        <div id="analysesList" class="analyses-grid"></div>
+
+        <!-- Empty State -->
+        <div id="emptyState" style="text-align: center; padding: 60px 20px; display: none;">
+            <div style="font-size: 48px; margin-bottom: 20px;">📄</div>
+            <h2 style="color: #666;">No analyses yet</h2>
+            <p style="color: #999; margin: 10px 0 20px 0;">Upload a spec to get started</p>
+            <button class="btn-primary" onclick="startNewAnalysis()">
+                + New Analysis
+            </button>
+        </div>
+    </div>
+
+    <script type="module" src="job-analyses.js"></script>
+</body>
+</html>

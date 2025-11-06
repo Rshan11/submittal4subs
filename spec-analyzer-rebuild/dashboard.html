@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Spec Analyzer</title>
+    <link rel="stylesheet" href="dashboard-style.css">
+</head>
+<body>
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1 class="app-title">Spec Analyzer</h1>
+            </div>
+            
+            <button class="btn-new-job" id="newJobBtn">
+                <span class="plus-icon">+</span>
+                New Job
+            </button>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <a href="#" class="nav-link">Active Jobs</a>
+                </div>
+                <div class="nav-section">
+                    <a href="#" class="nav-link">Archived</a>
+                </div>
+                <div class="nav-section">
+                    <a href="#" class="nav-link">Help</a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Navigation -->
+            <header class="top-nav">
+                <nav class="nav-tabs">
+                    <a href="#" class="nav-tab">Dashboard</a>
+                    <a href="#" class="nav-tab active">Jobs</a>
+                    <a href="#" class="nav-tab">Upload</a>
+                    <a href="#" class="nav-tab">Account</a>
+                </nav>
+                
+                <div class="user-profile">
+                    <button class="profile-btn" id="profileBtn">
+                        <svg class="profile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="8" r="4"/>
+                            <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <h2 class="page-title">Spec Jobs</h2>
+                
+                <!-- Jobs Table -->
+                <div class="jobs-table-container">
+                    <table class="jobs-table">
+                        <thead>
+                            <tr>
+                                <th>Job Name</th>
+                                <th>Created</th>
+                                <th>Status</th>
+                                <th>Analyses</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobsTableBody">
+                            <!-- Dummy Data -->
+                            <tr class="job-row" data-job-id="1">
+                                <td class="job-name">Great Falls Apts</td>
+                                <td>Oct 29</td>
+                                <td>
+                                    <span class="status-badge status-done">
+                                        <span class="status-icon">●</span> Done
+                                    </span>
+                                </td>
+                                <td class="analyses-count">Drac</td>
+                                <td>
+                                    <button class="btn-chevron">›</button>
+                                </td>
+                            </tr>
+                            <tr class="job-row" data-job-id="2">
+                                <td class="job-name">Sanavita Estates</td>
+                                <td>Oct 27</td>
+                                <td>
+                                    <span class="status-badge status-processing">
+                                        <span class="status-icon">●</span> Processing
+                                    </span>
+                                </td>
+                                <td class="analyses-count">1</td>
+                                <td>
+                                    <button class="btn-chevron">›</button>
+                                </td>
+                            </tr>
+                            <tr class="job-row" data-job-id="3">
+                                <td class="job-name">Lame Deer Hospital</td>
+                                <td>Oct 22</td>
+                                <td>
+                                    <span class="status-badge status-failed">
+                                        <span class="status-icon">⚠</span> Failed
+                                    </span>
+                                </td>
+                                <td class="analyses-count">2</td>
+                                <td>
+                                    <button class="btn-chevron">›</button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal: Analyze Spec -->
+    <div class="modal-overlay" id="analyzeModal" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Analyze Spec</h3>
+                <button class="modal-close" id="closeModalBtn">×</button>
+            </div>
+            
+            <div class="modal-body">
+                <label class="modal-label">What do you want to find?</label>
+                
+                <div class="analysis-options">
+                    <button class="analysis-option" data-type="submittals">
+                        <span class="option-icon">📋</span>
+                        <span>Submittals</span>
+                    </button>
+                    
+                    <button class="analysis-option" data-type="testing">
+                        <span class="option-icon">🧪</span>
+                        <span>Testing</span>
+                    </button>
+                    
+                    <button class="analysis-option" data-type="products">
+                        <span class="option-icon">📦</span>
+                        <span>Products & Materials</span>
+                    </button>
+                    
+                    <button class="analysis-option" data-type="custom">
+                        <span class="option-icon">✏️</span>
+                        <span>Custom prompt</span>
+                    </button>
+                </div>
+                
+                <!-- Custom Prompt Input (hidden by default) -->
+                <div class="custom-prompt-container" id="customPromptContainer" style="display: none;">
+                    <textarea 
+                        class="custom-prompt-input" 
+                        id="customPromptInput" 
+                        placeholder="Enter your custom analysis prompt..."
+                        rows="4"
+                    ></textarea>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancelBtn">Cancel</button>
+                <button class="btn-primary" id="analyzeBtn">Analyze</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: New Job -->
+    <div class="modal-overlay" id="newJobModal" style="display: none;">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h3>Create New Job</h3>
+                <button class="modal-close" id="closeNewJobBtn">×</button>
+            </div>
+            
+            <div class="modal-body">
+                <label class="modal-label">Job Name</label>
+                <input 
+                    type="text" 
+                    class="input-field" 
+                    id="jobNameInput" 
+                    placeholder="e.g., Downtown Office Building"
+                />
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancelNewJobBtn">Cancel</button>
+                <button class="btn-primary" id="createJobBtn">Create Job</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

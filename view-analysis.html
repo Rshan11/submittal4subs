@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Analysis - Spec Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <header class="top-nav">
+        <div class="nav-container">
+            <div class="nav-left">
+                <a href="/dashboard.html" class="logo-link">
+                    🔨 <span>PM4Subs Spec Analyzer</span>
+                </a>
+            </div>
+            <div class="nav-right">
+                <a href="#" onclick="goBack()" class="nav-link">← Back</a>
+                <span class="user-email" id="navUserEmail"></span>
+                <button class="btn-logout" id="navLogoutBtn">Sign Out</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container" style="max-width: 1400px; margin: 20px auto;">
+        <!-- Action Buttons -->
+        <div style="display: flex; gap: 12px; margin-bottom: 20px; justify-content: flex-end;">
+            <button id="downloadMarkdownBtn" class="btn-secondary">
+                📥 Download Markdown
+            </button>
+            <button id="downloadPdfBtn" class="btn-primary">
+                📄 Download PDF Report
+            </button>
+            <button id="newAnalysisBtn" class="btn-primary">
+                🔄 New Analysis
+            </button>
+        </div>
+
+        <!-- Results Display -->
+        <div id="resultsContent" class="results-container"></div>
+    </div>
+
+    <script type="module" src="view-analysis.js"></script>
+</body>
+</html>
