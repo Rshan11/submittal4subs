@@ -15,6 +15,7 @@ create index if not exists idx_jobs_user_id on jobs(user_id);
 
 alter table jobs enable row level security;
 
+drop policy if exists "Users can manage own jobs" on jobs;
 create policy "Users can manage own jobs" on jobs
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
