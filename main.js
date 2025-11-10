@@ -254,7 +254,7 @@ async function analyzeDocument() {
 
     showSection('loading');
     analysisStartTime = Date.now();
-    updateLoadingStatus('Extracting PDF text...', 10);
+    updateLoadingStatus('Extracting PDF text...', 5);
 
     try {
         // STEP 1: Extract full PDF text
@@ -262,26 +262,68 @@ async function analyzeDocument() {
         const arrayBuffer = await currentFile.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const totalPages = pdf.numPages;
-        
+
         console.log(`[UNIFIED] Extracting all ${totalPages} pages...`);
         let pdfText = '';
-        
+
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             pdfText += `\n\f--- PAGE ${pageNum} ---\n${pageText}\n`;
-            
+
             if (pageNum % 10 === 0) {
-                const progress = 10 + (pageNum / totalPages) * 30;
+                const progress = 5 + (pageNum / totalPages) * 20;
                 updateLoadingStatus(`Extracting PDF text... (page ${pageNum}/${totalPages})`, progress);
             }
         }
-        
+
         console.log(`[UNIFIED] Extracted ${pdfText.length} characters from ${totalPages} pages`);
+
+        // PHASE 0: Document Intelligence (NEW!)
+        updateLoadingStatus('Analyzing document structure...', 25);
+        console.log('[PHASE-0] Calling document-intelligence Edge Function...');
+
+        const docIntelResponse = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/document-intelligence`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    pdfText,
+                    fileName: currentFile.name,
+                    totalPages,
+                    fileSize: currentFile.size
+                })
+            }
+        );
+
+        let documentIntelligence = null;
+        if (docIntelResponse.ok) {
+            documentIntelligence = await docIntelResponse.json();
+            console.log('[PHASE-0] Document intelligence:', {
+                cached: documentIntelligence.cached,
+                hasTOC: documentIntelligence.hasTOC,
+                structure: documentIntelligence.documentStructure,
+                method: documentIntelligence.extractionMethod,
+                confidence: documentIntelligence.confidence,
+                divisions: documentIntelligence.divisionMap?.length || 0
+            });
+
+            if (documentIntelligence.cached) {
+                updateLoadingStatus('✓ Using cached document analysis', 30);
+            } else {
+                updateLoadingStatus('✓ Document structure analyzed', 30);
+            }
+        } else {
+            console.warn('[PHASE-0] Document intelligence failed, continuing without it');
+        }
         
         // STEP 2: Extract coordination sections - PRIORITIZED
-        updateLoadingStatus('Finding coordination requirements...', 45);
+        updateLoadingStatus('Finding coordination requirements...', 35);
         
         console.log('[COORD] Scanning for critical coordination sections...');
         
@@ -348,20 +390,26 @@ async function analyzeDocument() {
         console.log(`[COORD] Total coordination text: ${coordinationText.length} chars from ${extractedCount} sections`);
         
         // STEP 3: Call unified Edge Function
-        updateLoadingStatus('Analyzing specification with AI...', 60);
+        updateLoadingStatus('Analyzing specification with AI...', 55);
         console.log('[UNIFIED] Calling analyze-spec-unified Edge Function...');
-        
+
         const requestBody = {
             pdfText,
             trade: selectedTrade,
             totalPages,
             projectName: currentFile.name
         };
-        
+
         // Add coordination text if we extracted any
         if (coordinationText && coordinationText.length > 100) {
             requestBody.coordinationText = coordinationText;
             console.log('[UNIFIED] Including coordination text:', coordinationText.length, 'chars');
+        }
+
+        // Add document intelligence if available
+        if (documentIntelligence) {
+            requestBody.documentIntelligence = documentIntelligence;
+            console.log('[UNIFIED] Including document intelligence data');
         }
         
         const response = await fetch(
@@ -403,7 +451,15 @@ async function analyzeDocument() {
                             division01: result.division01,
                             materials: result.materials,
                             coordination: result.coordination,
-                            metadata: result.metadata
+                            metadata: {
+                                ...result.metadata,
+                                documentIntelligence: documentIntelligence ? {
+                                    hasTOC: documentIntelligence.hasTOC,
+                                    structure: documentIntelligence.documentStructure,
+                                    method: documentIntelligence.extractionMethod,
+                                    cached: documentIntelligence.cached
+                                } : null
+                            }
                         }
                     })
                     .select()
