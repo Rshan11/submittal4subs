@@ -233,7 +233,23 @@ function formatFileSize(bytes) {
 }
 
 // ============================================================================
-// MAIN ANALYSIS FUNCTION - The core of the app
+// FILE HASH CALCULATION for Phase 0 caching
+// ============================================================================
+async function calculateFileHash(file) {
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    } catch (error) {
+        console.error('[HASH] Error calculating file hash:', error);
+        return null;
+    }
+}
+
+// ============================================================================
+// MAIN ANALYSIS FUNCTION - Python Service Integration
 // ============================================================================
 async function analyzeDocument() {
     if (!currentFile) {
@@ -254,194 +270,164 @@ async function analyzeDocument() {
 
     showSection('loading');
     analysisStartTime = Date.now();
-    updateLoadingStatus('Extracting PDF text...', 10);
+    updateLoadingStatus('Calculating file hash...', 5);
 
     try {
-        // STEP 1: Extract full PDF text
-        console.log('[UNIFIED] Starting complete PDF extraction...');
-        const arrayBuffer = await currentFile.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const totalPages = pdf.numPages;
+        // STEP 1: Calculate file hash for caching
+        console.log('[PYTHON] Calculating file hash...');
+        const fileHash = await calculateFileHash(currentFile);
+        console.log('[PYTHON] File hash:', fileHash);
         
-        console.log(`[UNIFIED] Extracting all ${totalPages} pages...`);
-        let pdfText = '';
+        // STEP 2: Upload PDF to Supabase Storage
+        updateLoadingStatus('Uploading PDF to storage...', 10);
+        console.log('[PYTHON] Uploading to Supabase Storage...');
         
-        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-            const page = await pdf.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            pdfText += `\n\f--- PAGE ${pageNum} ---\n${pageText}\n`;
-            
-            if (pageNum % 10 === 0) {
-                const progress = 10 + (pageNum / totalPages) * 30;
-                updateLoadingStatus(`Extracting PDF text... (page ${pageNum}/${totalPages})`, progress);
-            }
+        const filePath = `specifications/${fileHash}/${currentFile.name}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('specifications')
+            .upload(filePath, currentFile, {
+                cacheControl: '3600',
+                upsert: true
+            });
+        
+        if (uploadError) {
+            console.error('[PYTHON] Upload error:', uploadError);
+            throw new Error(`Failed to upload PDF: ${uploadError.message}`);
         }
         
-        console.log(`[UNIFIED] Extracted ${pdfText.length} characters from ${totalPages} pages`);
+        console.log('[PYTHON] Upload successful:', filePath);
         
-        // STEP 2: Extract coordination sections - PRIORITIZED
-        updateLoadingStatus('Finding coordination requirements...', 45);
-        
-        console.log('[COORD] Scanning for critical coordination sections...');
-        
-        // PRIORITY ORDER: Most critical divisions for each trade
-        const priorityDivisions = {
-            'masonry': ['03', '05', '07', '08'],      // Concrete, Steel, Waterproofing, Openings
-            'concrete': ['04', '05', '07'],           // Masonry, Steel, Waterproofing
-            'waterproofing': ['03', '04', '07'],      // Concrete, Masonry, Related waterproofing
-            'steel': ['03', '04', '07'],              // Concrete, Masonry, Fireproofing
-            'roofing': ['06', '07', '08'],            // Framing, Waterproofing, Penetrations
-            'default': ['03', '05', '06', '07', '08'] // Generic priorities
-        };
-        
-        const criticalDivs = priorityDivisions[selectedTrade] || priorityDivisions['default'];
-        
-        // Find all section references
-        const sectionRefs = new Set();
-        const patterns = [
-            /Section\s+(\d{6})/gi,
-            /Section\s+(\d{2}\s\d{2}\s\d{2})/gi,
-        ];
-        
-        for (const pattern of patterns) {
-            let match;
-            while ((match = pattern.exec(pdfText)) !== null) {
-                const sectionNum = match[1].replace(/\s/g, '');
-                const divNum = sectionNum.substring(0, 2);
-                
-                // Only extract if it's a critical division for this trade
-                if (criticalDivs.includes(divNum)) {
-                    sectionRefs.add(sectionNum);
-                }
-            }
-        }
-        
-        console.log(`[COORD] Found ${sectionRefs.size} critical coordination sections:`, 
-                    Array.from(sectionRefs).slice(0, 10).join(', '));
-        
-        // Extract text for priority sections only (limit to 20 max to avoid overwhelming Gemini)
-        let coordinationText = '';
-        let extractedCount = 0;
-        const maxSections = 20;
-        
-        for (const sectionNum of sectionRefs) {
-            if (extractedCount >= maxSections) {
-                console.log(`[COORD] Limiting to ${maxSections} sections to avoid overload`);
-                break;
-            }
-            
-            const sectionPattern = new RegExp(
-                `(--- PAGE \\d+ ---[\\s\\S]{0,2000}?SECTION\\s+${sectionNum}[\\s\\S]{0,25000}?)(?=--- PAGE \\d+ ---[\\s\\S]{0,1000}?SECTION|$)`,
-                'i'
-            );
-            
-            const match = sectionPattern.exec(pdfText);
-            
-            if (match) {
-                console.log(`[COORD] ✓ Section ${sectionNum}: ${match[1].length} chars`);
-                coordinationText += `\n\n=== SECTION ${sectionNum} ===\n${match[1]}\n`;
-                extractedCount++;
-            }
-        }
-        
-        console.log(`[COORD] Total coordination text: ${coordinationText.length} chars from ${extractedCount} sections`);
-        
-        // STEP 3: Call unified Edge Function
-        updateLoadingStatus('Analyzing specification with AI...', 60);
-        console.log('[UNIFIED] Calling analyze-spec-unified Edge Function...');
-        
-        const requestBody = {
-            pdfText,
-            trade: selectedTrade,
-            totalPages,
-            projectName: currentFile.name
-        };
-        
-        // Add coordination text if we extracted any
-        if (coordinationText && coordinationText.length > 100) {
-            requestBody.coordinationText = coordinationText;
-            console.log('[UNIFIED] Including coordination text:', coordinationText.length, 'chars');
-        }
+        // STEP 3: Call analyze-spec-python Edge Function
+        updateLoadingStatus('Starting analysis...', 20);
+        console.log('[PYTHON] Calling analyze-spec-python...');
         
         const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-unified`,
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-python`,
             {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(requestBody)
+                body: JSON.stringify({
+                    fileHash: fileHash,
+                    filePath: filePath,
+                    tradeType: selectedTrade,
+                    projectName: currentFile.name,
+                    userId: currentUser?.id
+                })
             }
         );
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error('[UNIFIED] Error response:', errorData);
-            throw new Error(errorData.error || 'Analysis failed');
+            console.error('[PYTHON] Error response:', errorData);
+            throw new Error(errorData.error || 'Analysis failed to start');
         }
 
-        updateLoadingStatus('Processing results...', 90);
         const result = await response.json();
-        console.log('[UNIFIED] Analysis complete:', result.metadata);
+        console.log('[PYTHON] Job submitted:', result);
         
-        // STEP 4: Save analysis to database
-        if (jobId && currentUser) {
-            try {
-                updateLoadingStatus('Saving analysis...', 95);
-                const { data: savedAnalysis, error } = await supabase
-                    .from('spec_analyses')
-                    .insert({
-                        user_id: currentUser.id,
-                        job_id: jobId,
-                        file_name: currentFile.name,
-                        analysis_type: selectedTrade,
-                        status: 'completed',
-                        results: {
-                            contract: result.contract,
-                            division01: result.division01,
-                            materials: result.materials,
-                            coordination: result.coordination,
-                            metadata: result.metadata
-                        }
-                    })
-                    .select()
-                    .single();
-                
-                if (error) {
-                    console.error('Failed to save analysis:', error);
-                } else {
-                    console.log('Analysis saved:', savedAnalysis.id);
-                    window.currentAnalysisId = savedAnalysis.id;
+        const jobId = result.jobId;
+        
+        // STEP 4: Poll for job completion
+        updateLoadingStatus('Processing specification (this may take 2-3 minutes)...', 30);
+        console.log('[PYTHON] Polling for job completion...');
+        
+        let jobComplete = false;
+        let attempts = 0;
+        const maxAttempts = 60; // 5 minutes max (5 second intervals)
+        
+        while (!jobComplete && attempts < maxAttempts) {
+            attempts++;
+            
+            // Wait 5 seconds between polls
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Update progress
+            const progress = 30 + (attempts / maxAttempts) * 60;
+            updateLoadingStatus(`Processing specification... (${attempts * 5}s elapsed)`, progress);
+            
+            // Check job status
+            const statusResponse = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-job-status?jobId=${jobId}`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+                    }
                 }
-            } catch (err) {
-                console.error('Error saving analysis:', err);
+            );
+            
+            if (!statusResponse.ok) {
+                console.error('[PYTHON] Status check failed');
+                continue;
             }
+            
+            const statusData = await statusResponse.json();
+            console.log('[PYTHON] Job status:', statusData.status);
+            
+            if (statusData.status === 'completed') {
+                jobComplete = true;
+                console.log('[PYTHON] Job completed!', statusData);
+                
+                // STEP 5: Format and display results
+                updateLoadingStatus('Formatting results...', 95);
+                
+                analysisResult = {
+                    contract: {}, // TODO: Will be added in Phase 4
+                    division01: {},
+                    tradeRequirements: formatPhase1Results(statusData.extractionData),
+                    coordination: [], // TODO: Will be added in Phase 3
+                    submittals: [],
+                    metadata: {
+                        trade: selectedTrade,
+                        processingTime: statusData.result?.pages_processed || 0,
+                        jobId: jobId
+                    }
+                };
+                
+                updateLoadingStatus('Complete!', 100);
+                displayResults(analysisResult);
+                
+            } else if (statusData.status === 'failed') {
+                throw new Error(statusData.result?.error || 'Analysis failed');
+            }
+            // Otherwise keep polling (status is 'pending' or 'processing')
         }
         
-        // STEP 5: Format and display results
-        updateLoadingStatus('Complete!', 100);
-        
-        analysisResult = {
-            contract: result.contract || {},
-            division01: result.division01 || {},
-            tradeRequirements: formatMaterialsForDisplay(result.materials),
-            coordination: result.coordination,
-            submittals: extractSubmittalsFromMaterials(result.materials),
-            metadata: {
-                ...result.metadata,
-                trade: selectedTrade,
-                processingTime: result.metadata.processingTime
-            }
-        };
-        
-        displayResults(analysisResult);
+        if (!jobComplete) {
+            throw new Error('Analysis timed out. Please try again with a smaller specification.');
+        }
         
     } catch (error) {
-        console.error('[UNIFIED] Analysis error:', error);
+        console.error('[PYTHON] Analysis error:', error);
         showError(error.message || 'Failed to analyze document. Please try again.');
     }
+}
+
+// Helper function to format Phase 1 extraction results
+function formatPhase1Results(extractionData) {
+    if (!extractionData || !extractionData.extracted_data) {
+        return '# Phase 1 Complete\n\nExtraction completed successfully. Additional analysis phases coming soon.';
+    }
+    
+    const data = extractionData.extracted_data;
+    
+    let text = '# Extraction Results\n\n';
+    text += `**Trade Type:** ${data.trade_type}\n\n`;
+    text += `**Divisions Extracted:** ${data.divisions_extracted?.join(', ')}\n\n`;
+    text += `**Pages Processed:** ${data.total_pages}\n\n`;
+    text += `**Text Length:** ${data.text_length?.toLocaleString()} characters\n\n`;
+    text += '---\n\n';
+    text += '## Extracted Content Preview\n\n';
+    
+    if (data.extracted_text) {
+        const preview = data.extracted_text.substring(0, 2000);
+        text += `${preview}...\n\n`;
+        text += `*Showing first 2000 characters. Full extraction complete.*\n`;
+    }
+    
+    return text;
 }
 
 // ============================================================================
