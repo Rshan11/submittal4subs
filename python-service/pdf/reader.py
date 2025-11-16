@@ -51,6 +51,30 @@ def extract_pages_from_pdf(pdf_bytes: bytes, start_page: int, end_page: int) -> 
     pages = list(range(start_page, end_page + 1))
     return extract_text_from_pages(pdf_bytes, pages)
 
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """
+    Extract all text from entire PDF
+    
+    Args:
+        pdf_bytes: PDF file as bytes
+    
+    Returns:
+        All text from the PDF concatenated
+    """
+    pdf_stream = io.BytesIO(pdf_bytes)
+    reader = PdfReader(pdf_stream)
+    
+    extracted_text = []
+    
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text()
+        # Add page marker for reference
+        extracted_text.append(f"\n--- Page {page_num + 1} ---\n")
+        extracted_text.append(text)
+    
+    return "".join(extracted_text)
+
+
 def get_pdf_page_count(pdf_bytes: bytes) -> int:
     """Get total number of pages in PDF"""
     pdf_stream = io.BytesIO(pdf_bytes)
