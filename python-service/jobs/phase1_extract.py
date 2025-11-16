@@ -6,6 +6,8 @@ Phase 1: Targeted Extraction
 - Store in spec_materials table
 """
 import json
+import re
+import traceback
 from typing import Dict, List
 from db.supabase import (
     get_job,
@@ -14,7 +16,11 @@ from db.supabase import (
     get_division_map,
     SupabaseClient
 )
-from pdf.reader import extract_pages_from_pdf, extract_text_from_pages
+from pdf.reader import (
+    extract_pages_from_pdf, 
+    extract_text_from_pages,
+    extract_text_from_pdf  # Added - used in fallback
+)
 from pdf.clean import clean_text, normalize_text
 
 async def run_phase1(job_id: str) -> Dict:
@@ -108,8 +114,13 @@ async def run_phase1(job_id: str) -> Dict:
         }
         
     except Exception as e:
-        print(f"Error in Phase 1: {str(e)}")
-        await update_job_status(job_id, "failed", {"error": str(e)})
+        error_details = {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+        print(f"❌ Error in Phase 1: {str(e)}")
+        print(traceback.format_exc())
+        await update_job_status(job_id, "failed", error_details)
         raise
 
 
@@ -118,18 +129,35 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
     Fallback: Extract full document when no division map available
     Uses keyword-based division detection
     """
-    import re
-    
     try:
         print(f"🔄 Using keyword fallback for {trade_type}")
         
+        # Validate inputs
+        if not file_hash or not trade_type:
+            raise ValueError("file_hash and trade_type are required")
+        
         # Download PDF from storage
         file_path = job.get("file_path")
+        if not file_path:
+            raise ValueError("file_path not found in job data")
+        
+        print(f"  📥 Downloading PDF from: {file_path}")
         pdf_bytes = await get_document_from_storage(file_path)
         
-        # Extract ALL text from PDF
-        from pdf.reader import extract_text_from_pdf
+        # Validate PDF bytes
+        if not pdf_bytes or len(pdf_bytes) == 0:
+            raise ValueError("Downloaded PDF is empty")
+        
+        print(f"  ✓ Downloaded {len(pdf_bytes)} bytes")
+        
+        # Extract ALL text from PDF (function imported at top)
+        print(f"  📄 Extracting text from entire PDF...")
         full_text = extract_text_from_pdf(pdf_bytes)
+        
+        if not full_text or len(full_text) < 100:
+            raise ValueError(f"Extracted text is too short ({len(full_text)} chars) - PDF may be image-based")
+        
+        print(f"  ✓ Extracted {len(full_text)} characters")
         
         # Determine target divisions based on trade
         division_map_simple = {
@@ -138,22 +166,47 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
             'plumbing': ['00', '01', '22'],
             'hvac': ['00', '01', '23'],
             'concrete': ['00', '01', '03'],
-            'steel': ['00', '01', '05']
+            'steel': ['00', '01', '05'],
+            'drywall': ['00', '01', '09'],
+            'roofing': ['00', '01', '07'],
+            'carpentry': ['00', '01', '06']
         }
         
         target_divisions = division_map_simple.get(trade_type, ['00', '01'])
+        print(f"  🎯 Target divisions for {trade_type}: {target_divisions}")
         
         # Extract divisions using keyword patterns
+        print(f"  🔍 Searching for divisions in text...")
         extracted_sections = extract_divisions_by_keyword(full_text, target_divisions)
+        
+        # Validate extraction results
+        if not extracted_sections or all(not v for v in extracted_sections.values()):
+            print(f"  ⚠️  No content extracted - PDF may be scanned/image-based")
+            error_result = {
+                "error": "No text content found in PDF",
+                "extracted_sections": {},
+                "file_path": file_path,
+                "pdf_size": len(pdf_bytes)
+            }
+            await update_job_status(job_id, "failed", error_result)
+            return error_result
+        
+        if not extracted_sections:
+            print(f"  ⚠️  No divisions found - using full document")
+            extracted_sections = {'full_document': full_text}
         
         # Combine all extracted text
         combined_text = "\n\n".join(extracted_sections.values())
+        print(f"  ✓ Combined {len(extracted_sections)} sections: {len(combined_text)} chars")
         
         # Clean and normalize
         cleaned_text = clean_text(combined_text)
         normalized_text = normalize_text(cleaned_text)
         
-        print(f"✓ Extracted {len(extracted_sections)} divisions, {len(normalized_text)} characters")
+        print(f"✅ Fallback extraction complete:")
+        print(f"   - Divisions found: {list(extracted_sections.keys())}")
+        print(f"   - Total text: {len(normalized_text)} characters")
+        print(f"   - Cleaned text: {len(cleaned_text)} chars")
         
         # Store result
         client = SupabaseClient.get_client()
@@ -182,30 +235,47 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
         }
         
     except Exception as e:
-        print(f"Error in fallback extraction: {str(e)}")
-        await update_job_status(job_id, "failed", {"error": str(e)})
+        error_details = {
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "extraction_method": "keyword_fallback"
+        }
+        print(f"❌ Error in fallback extraction: {str(e)}")
+        print(traceback.format_exc())
+        await update_job_status(job_id, "failed", error_details)
         raise
 
 
 def extract_divisions_by_keyword(text: str, target_divisions: List[str]) -> Dict[str, str]:
-    """Extract divisions using regex patterns when no TOC available"""
-    import re
+    """
+    Extract divisions using regex patterns when no TOC available
+    
+    Args:
+        text: Full PDF text content
+        target_divisions: List of division numbers to find (e.g., ['00', '01', '04'])
+    
+    Returns:
+        Dictionary mapping division numbers to extracted text
+    """
+    if not text or not target_divisions:
+        return {}
     
     results = {}
     
+    # Comprehensive division patterns - supports multiple formats
     division_patterns = {
-        '00': r'DIVISION\s*0*0\s*[-–—]\s*PROCUREMENT',
-        '01': r'DIVISION\s*0*1\s*[-–—]\s*GENERAL\s*REQUIREMENTS',
-        '03': r'DIVISION\s*0*3\s*[-–—]\s*CONCRETE',
-        '04': r'DIVISION\s*0*4\s*[-–—]\s*MASONRY',
-        '05': r'DIVISION\s*0*5\s*[-–—]\s*METALS',
-        '06': r'DIVISION\s*0*6\s*[-–—]\s*WOOD',
-        '07': r'DIVISION\s*0*7\s*[-–—]\s*THERMAL',
-        '08': r'DIVISION\s*0*8\s*[-–—]\s*OPENINGS',
-        '09': r'DIVISION\s*0*9\s*[-–—]\s*FINISHES',
-        '22': r'DIVISION\s*0*22\s*[-–—]\s*PLUMBING',
-        '23': r'DIVISION\s*0*23\s*[-–—]\s*HVAC',
-        '26': r'DIVISION\s*0*26\s*[-–—]\s*ELECTRICAL',
+        '00': r'DIVISION\s*0*0\s*[-–—:]\s*PROCUREMENT',
+        '01': r'DIVISION\s*0*1\s*[-–—:]\s*GENERAL\s*REQUIREMENTS',
+        '03': r'DIVISION\s*0*3\s*[-–—:]\s*CONCRETE',
+        '04': r'DIVISION\s*0*4\s*[-–—:]\s*MASONRY',
+        '05': r'DIVISION\s*0*5\s*[-–—:]\s*METALS',
+        '06': r'DIVISION\s*0*6\s*[-–—:]\s*(WOOD|CARPENTRY)',
+        '07': r'DIVISION\s*0*7\s*[-–—:]\s*(THERMAL|MOISTURE)',
+        '08': r'DIVISION\s*0*8\s*[-–—:]\s*(OPENINGS|DOORS)',
+        '09': r'DIVISION\s*0*9\s*[-–—:]\s*FINISHES',
+        '22': r'DIVISION\s*0*22\s*[-–—:]\s*PLUMBING',
+        '23': r'DIVISION\s*0*23\s*[-–—:]\s*(HVAC|MECHANICAL)',
+        '26': r'DIVISION\s*0*26\s*[-–—:]\s*ELECTRICAL',
     }
     
     for div in target_divisions:
@@ -217,17 +287,26 @@ def extract_divisions_by_keyword(text: str, target_divisions: List[str]) -> Dict
                 # Found the division header
                 start_pos = matches[0].start()
                 
-                # Find next division or end of document
-                next_div_pattern = r'DIVISION\s*\d+\s*[-–—]'
-                next_matches = list(re.finditer(next_div_pattern, text[start_pos+100:], re.IGNORECASE))
+                # Find next division header or end of document
+                # Look ahead at least 500 chars to ensure we don't cut off too early
+                next_div_pattern = r'DIVISION\s*\d+\s*[-–—:]'
+                search_text = text[start_pos+500:]  # Skip ahead to avoid matching same division
+                next_matches = list(re.finditer(next_div_pattern, search_text, re.IGNORECASE))
                 
                 if next_matches:
-                    end_pos = start_pos + 100 + next_matches[0].start()
+                    end_pos = start_pos + 500 + next_matches[0].start()
                 else:
-                    end_pos = len(text)
+                    # No next division found - take rest of document or reasonable chunk
+                    end_pos = min(start_pos + 100000, len(text))  # Max 100KB per division
                 
-                results[div] = text[start_pos:end_pos]
-                print(f"  ✓ Found Division {div}: {len(results[div])} chars")
+                extracted = text[start_pos:end_pos].strip()
+                
+                # Validate extracted content is substantial
+                if len(extracted) > 200:  # At least 200 chars
+                    results[div] = extracted
+                    print(f"  ✓ Found Division {div}: {len(results[div])} chars")
+                else:
+                    print(f"  ⚠️  Division {div} found but too short ({len(extracted)} chars)")
             else:
                 print(f"  ⚠️  Division {div} not found in document")
     
