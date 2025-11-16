@@ -2,7 +2,6 @@
 Text cleaning and normalization utilities
 """
 import re
-from typing import str
 
 def clean_text(text: str) -> str:
     """
