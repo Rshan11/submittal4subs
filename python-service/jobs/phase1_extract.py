@@ -235,16 +235,11 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
             "text_length": len(normalized_text),
             "extracted_text": normalized_text,
             "divisions_found": list(extracted_sections.keys()),
+            "divisions_extracted": list(extracted_sections.keys()),
             "pages_processed": list(range(1, total_pages + 1)),
             "total_pages": total_pages,
             "extraction_strategy": "keyword_fallback",
-            "extraction_timestamp": datetime.utcnow().isoformat(),
-            "divisions_extracted": {
-                div: {
-                    "text": text,
-                    "length": len(text)
-                } for div, text in extracted_sections.items()
-            }
+            "extraction_timestamp": datetime.utcnow().isoformat()
         }
         
         client.table("phase1_extractions").insert({
