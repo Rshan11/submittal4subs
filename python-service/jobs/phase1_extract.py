@@ -8,6 +8,7 @@ Phase 1: Targeted Extraction
 import json
 import re
 import traceback
+from datetime import datetime
 from typing import Dict, List
 from db.supabase import (
     get_job,
@@ -210,13 +211,30 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
         
         # Store result
         client = SupabaseClient.get_client()
+        
+        # Get total pages from PDF
+        from PyPDF2 import PdfReader
+        from io import BytesIO
+        pdf_file = BytesIO(pdf_bytes)
+        pdf_reader = PdfReader(pdf_file)
+        total_pages = len(pdf_reader.pages)
+        
         result = {
             "file_hash": file_hash,
             "trade_type": trade_type,
-            "extraction_strategy": "keyword_fallback",
-            "divisions_found": list(extracted_sections.keys()),
             "text_length": len(normalized_text),
-            "extracted_text": normalized_text
+            "extracted_text": normalized_text,
+            "divisions_found": list(extracted_sections.keys()),
+            "pages_processed": list(range(1, total_pages + 1)),
+            "total_pages": total_pages,
+            "extraction_strategy": "keyword_fallback",
+            "extraction_timestamp": datetime.utcnow().isoformat(),
+            "divisions_extracted": {
+                div: {
+                    "text": text,
+                    "length": len(text)
+                } for div, text in extracted_sections.items()
+            }
         }
         
         client.table("phase1_extractions").insert({

@@ -75,7 +75,10 @@ serve(async (req) => {
 
     // If job is completed, also fetch extraction data from phase1_extractions table
     let extractionData = null;
+    let phase2Data = null;
+    
     if (job.status === "completed") {
+      // Fetch Phase 1 extraction data
       const { data: extraction, error: extractionError } = await supabase
         .from("phase1_extractions")
         .select("extracted_data")
@@ -87,12 +90,25 @@ serve(async (req) => {
         extractionData = extraction;
         console.log("Found extraction data");
       }
+
+      // Fetch Phase 2 materials analysis
+      const { data: phase2, error: phase2Error } = await supabase
+        .from("phase2_materials")
+        .select("materials, submittals, coordination, contract_terms, created_at")
+        .eq("job_id", jobId)
+        .single();
+      
+      if (phase2 && !phase2Error) {
+        phase2Data = phase2;
+        console.log("Found Phase 2 materials analysis");
+      }
     }
 
     // Return job with extraction data if available
     const response = {
       ...job,
-      extractionData: extractionData
+      extractionData: extractionData,
+      phase2Analysis: phase2Data
     };
 
     return new Response(
@@ -108,8 +124,9 @@ serve(async (req) => {
 
   } catch (err) {
     console.error("Unexpected error:", err);
+    const errorMessage = err instanceof Error ? err.message : "Unknown error";
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ error: errorMessage }),
       { 
         status: 500, 
         headers: { 
