@@ -382,7 +382,6 @@ async function analyzeDocument() {
                 
                 analysisResult = {
                     contract: hasPhase2 ? formatPhase2ContractTerms(statusData.phase2Analysis.contract_terms) : {},
-                    division01: {},
                     tradeRequirements: formatPhase1Results(statusData.extractionData, statusData.phase2Analysis),
                     coordination: hasPhase2 ? statusData.phase2Analysis.coordination : [],
                     submittals: hasPhase2 ? statusData.phase2Analysis.submittals : [],
