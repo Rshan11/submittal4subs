@@ -373,16 +373,25 @@ async function analyzeDocument() {
                 // STEP 5: Format and display results
                 updateLoadingStatus('Formatting results...', 95);
                 
+                // Check if Phase 2 analysis is available
+                const hasPhase2 = statusData.phase2Analysis && 
+                                  (statusData.phase2Analysis.materials?.length > 0 ||
+                                   statusData.phase2Analysis.submittals?.length > 0 ||
+                                   statusData.phase2Analysis.coordination?.length > 0 ||
+                                   statusData.phase2Analysis.contract_terms?.length > 0);
+                
                 analysisResult = {
-                    contract: {}, // TODO: Will be added in Phase 4
+                    contract: hasPhase2 ? formatPhase2ContractTerms(statusData.phase2Analysis.contract_terms) : {},
                     division01: {},
-                    tradeRequirements: formatPhase1Results(statusData.extractionData),
-                    coordination: [], // TODO: Will be added in Phase 3
-                    submittals: [],
+                    tradeRequirements: formatPhase1Results(statusData.extractionData, statusData.phase2Analysis),
+                    coordination: hasPhase2 ? statusData.phase2Analysis.coordination : [],
+                    submittals: hasPhase2 ? statusData.phase2Analysis.submittals : [],
+                    phase2Data: statusData.phase2Analysis || null,
                     metadata: {
                         trade: selectedTrade,
                         processingTime: statusData.result?.pages_processed || 0,
-                        jobId: jobId
+                        jobId: jobId,
+                        hasPhase2: hasPhase2
                     }
                 };
                 
@@ -405,8 +414,37 @@ async function analyzeDocument() {
     }
 }
 
+// Helper function to format Phase 2 contract terms
+function formatPhase2ContractTerms(contractTerms) {
+    if (!contractTerms || contractTerms.length === 0) {
+        return {};
+    }
+    
+    const formatted = {};
+    contractTerms.forEach(term => {
+        const category = term.category?.toLowerCase() || '';
+        const requirement = term.requirement || '';
+        
+        if (category.includes('payment')) {
+            formatted.payment = requirement;
+        } else if (category.includes('insurance')) {
+            formatted.insurance = requirement;
+        } else if (category.includes('bond')) {
+            formatted.bonding = requirement;
+        } else if (category.includes('warrant')) {
+            formatted.warranty = requirement;
+        } else if (category.includes('retain')) {
+            formatted.retainage = requirement;
+        } else if (category.includes('damage')) {
+            formatted.damages = requirement;
+        }
+    });
+    
+    return formatted;
+}
+
 // Helper function to format Phase 1 extraction results
-function formatPhase1Results(extractionData) {
+function formatPhase1Results(extractionData, phase2Data) {
     if (!extractionData || !extractionData.extracted_data) {
         return '# Phase 1 Complete\n\nExtraction completed successfully. Additional analysis phases coming soon.';
     }
