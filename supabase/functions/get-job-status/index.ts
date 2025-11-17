@@ -83,7 +83,8 @@ serve(async (req) => {
         .single();
       
       if (extraction && !extractionError) {
-        extractionData = extraction.extracted_data;
+        // Return the whole extraction object (frontend expects extractionData.extracted_data)
+        extractionData = extraction;
         console.log("Found extraction data");
       }
     }
