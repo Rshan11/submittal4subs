@@ -320,24 +320,30 @@ def extract_divisions_by_keyword(text: str, target_divisions: List[str]) -> Dict
                 # Found the division header
                 start_pos = matches[0].start()
                 
-                # Find next division header or end of document
-                # Look ahead at least 500 chars to ensure we don't cut off too early
+                # Find next division header - search for ANY division after this one
+                # Start searching 1000 chars ahead to avoid matching the current division header
+                search_start = start_pos + 1000
                 next_div_pattern = r'DIVISION\s*\d+\s*[-–—:]'
-                search_text = text[start_pos+500:]  # Skip ahead to avoid matching same division
-                next_matches = list(re.finditer(next_div_pattern, search_text, re.IGNORECASE))
+                
+                # Search for next division in remaining text
+                remaining_text = text[search_start:]
+                next_matches = list(re.finditer(next_div_pattern, remaining_text, re.IGNORECASE))
                 
                 if next_matches:
-                    end_pos = start_pos + 500 + next_matches[0].start()
+                    # Found next division - extract everything up to it
+                    end_pos = search_start + next_matches[0].start()
+                    print(f"  📍 Next division found at position {end_pos}")
                 else:
-                    # No next division found - take rest of document or reasonable chunk
-                    end_pos = min(start_pos + 100000, len(text))  # Max 100KB per division
+                    # No next division found - take rest of document
+                    end_pos = len(text)
+                    print(f"  📍 No next division - extracting to end of document")
                 
                 extracted = text[start_pos:end_pos].strip()
                 
                 # Validate extracted content is substantial
                 if len(extracted) > 200:  # At least 200 chars
                     results[div] = extracted
-                    print(f"  ✓ Found Division {div}: {len(results[div])} chars")
+                    print(f"  ✓ Found Division {div}: {len(extracted):,} characters extracted")
                 else:
                     print(f"  ⚠️  Division {div} found but too short ({len(extracted)} chars)")
             else:
