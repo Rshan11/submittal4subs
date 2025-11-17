@@ -223,7 +223,7 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
         client = SupabaseClient.get_client()
         
         # Get total pages from PDF
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
         from io import BytesIO
         pdf_file = BytesIO(pdf_bytes)
         pdf_reader = PdfReader(pdf_file)
