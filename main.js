@@ -743,8 +743,7 @@ async function downloadPDF() {
             filename: currentFile.name,
             analyzedDate: new Date().toISOString(),
             contractAnalysis: {
-                division00: analysisResult.contract,
-                division01: analysisResult.division01
+                division00: analysisResult.contract
             },
             tradeAnalysis: {
                 requirements: analysisResult.tradeRequirements
