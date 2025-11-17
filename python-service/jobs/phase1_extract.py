@@ -107,6 +107,16 @@ async def run_phase1(job_id: str) -> Dict:
         # Update job status
         await update_job_status(job_id, "completed", result)
         
+        # Automatically trigger Phase 2 analysis
+        try:
+            from jobs.phase2_materials import run_phase2
+            print(f"🚀 Starting Phase 2 analysis for job {job_id}...")
+            phase2_result = await run_phase2(job_id)
+            print(f"✅ Phase 2 completed for job {job_id}")
+        except Exception as e:
+            print(f"⚠️  Phase 2 failed (non-critical): {str(e)}")
+            # Don't fail Phase 1 if Phase 2 has issues
+        
         return {
             "status": "success",
             "job_id": job_id,
@@ -244,6 +254,16 @@ async def extract_full_document_fallback(job_id: str, job: Dict, file_hash: str,
         }).execute()
         
         await update_job_status(job_id, "completed", result)
+        
+        # Automatically trigger Phase 2 analysis
+        try:
+            from jobs.phase2_materials import run_phase2
+            print(f"🚀 Starting Phase 2 analysis for job {job_id}...")
+            phase2_result = await run_phase2(job_id)
+            print(f"✅ Phase 2 completed for job {job_id}")
+        except Exception as e:
+            print(f"⚠️  Phase 2 failed (non-critical): {str(e)}")
+            # Don't fail Phase 1 if Phase 2 has issues
         
         return {
             "status": "success",
