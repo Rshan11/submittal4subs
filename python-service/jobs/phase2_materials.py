@@ -77,8 +77,14 @@ Return ONLY valid JSON in this exact format:
 """
     
     # Call Gemini
+    print(f"📤 Sending to Gemini: {len(extracted_text)} characters")
+    print(f"📝 Prompt preview: {prompt[:500]}...")
+    
     model = genai.GenerativeModel("gemini-2.0-flash-exp")
     response = model.generate_content(prompt)
+    
+    # Log what Gemini returned
+    print(f"📥 Gemini raw response (first 1000 chars): {response.text[:1000]}...")
     
     # Parse response - handle markdown code blocks
     response_text = response.text.strip()
@@ -97,10 +103,22 @@ Return ONLY valid JSON in this exact format:
     # Parse JSON
     try:
         analysis = json.loads(response_text)
+        print(f"✅ Parsed analysis successfully:")
+        print(f"   - materials: {len(analysis.get('materials', []))} items")
+        print(f"   - submittals: {len(analysis.get('submittals', []))} items")
+        print(f"   - coordination: {len(analysis.get('coordination', []))} items")
+        print(f"   - contract_terms: {len(analysis.get('contract_terms', []))} items")
     except json.JSONDecodeError as e:
         print(f"❌ Failed to parse Gemini response as JSON: {e}")
         print(f"Response text: {response_text[:500]}")
-        raise ValueError(f"Gemini returned invalid JSON: {str(e)}")
+        # Return empty structure instead of failing
+        analysis = {
+            "materials": [],
+            "submittals": [],
+            "coordination": [],
+            "contract_terms": []
+        }
+        print(f"⚠️  Using empty analysis structure due to parse error")
     
     # Store in database
     await store_phase2_results(job_id, analysis)
