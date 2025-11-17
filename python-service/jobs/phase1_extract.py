@@ -29,6 +29,7 @@ async def run_phase1(job_id: str) -> Dict:
     Phase 1: Extract targeted content from PDF based on division map
     
     Steps:
+    0. Run Phase 0 to build division map (if not cached)
     1. Get job details and division map
     2. Download PDF from storage
     3. Extract only relevant pages
@@ -43,14 +44,31 @@ async def run_phase1(job_id: str) -> Dict:
         job = await get_job(job_id)
         file_hash = job.get("file_hash")
         trade_type = job.get("trade_type", "masonry")
+        file_path = job.get("file_path")
         
         # Get division map from cache
         division_map = await get_division_map(file_hash)
         
-        # If no division map, use keyword fallback
-        if not division_map:
-            print(f"⚠️  No division map cached for {file_hash} - using keyword fallback")
-            return await extract_full_document_fallback(job_id, job, file_hash, trade_type)
+        # If no division map, run Phase 0 to build it
+        if not division_map or not division_map.get('divisions'):
+            print(f"🔍 No division map cached for {file_hash} - running Phase 0...")
+            
+            # Download PDF for Phase 0
+            pdf_bytes = await get_document_from_storage(file_path)
+            
+            # Run Phase 0 document intelligence
+            from jobs.phase0_document_intelligence import run_phase0
+            phase0_result = await run_phase0(file_hash, pdf_bytes)
+            
+            # Get the newly created division map
+            division_map = await get_division_map(file_hash)
+            
+            # If Phase 0 still didn't create a valid map, use keyword fallback
+            if not division_map or not division_map.get('divisions'):
+                print(f"⚠️  Phase 0 couldn't detect divisions - using keyword fallback")
+                return await extract_full_document_fallback(job_id, job, file_hash, trade_type)
+        
+        print(f"✅ Using division map with {len(division_map.get('divisions', {}))} divisions detected")
         
         # Load trade mappings to know which divisions to extract
         with open("trade_mappings.json", "r") as f:
