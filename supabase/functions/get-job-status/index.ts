@@ -73,8 +73,29 @@ serve(async (req) => {
 
     console.log(`Job status: ${job.status}`);
 
+    // If job is completed, also fetch extraction data from phase1_extractions table
+    let extractionData = null;
+    if (job.status === "completed") {
+      const { data: extraction, error: extractionError } = await supabase
+        .from("phase1_extractions")
+        .select("extracted_data")
+        .eq("job_id", jobId)
+        .single();
+      
+      if (extraction && !extractionError) {
+        extractionData = extraction.extracted_data;
+        console.log("Found extraction data");
+      }
+    }
+
+    // Return job with extraction data if available
+    const response = {
+      ...job,
+      extractionData: extractionData
+    };
+
     return new Response(
-      JSON.stringify(job),
+      JSON.stringify(response),
       { 
         status: 200, 
         headers: { 
