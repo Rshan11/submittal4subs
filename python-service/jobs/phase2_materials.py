@@ -57,7 +57,7 @@ Extract the following information in JSON format:
    - Warranty terms
 
 SPECIFICATION TEXT:
-{extracted_text[:8000]}
+{extracted_text[:100000]}
 
 Return ONLY valid JSON in this exact format:
 {{
