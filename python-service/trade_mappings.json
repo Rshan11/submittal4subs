@@ -1,13 +1,11 @@
 {
   "masonry": {
     "name": "Masonry & Concrete",
-    "primary_divisions": ["00", "01", "03", "04", "07"],
+    "primary_divisions": ["00", "01", "04"],
     "division_names": {
       "00": "Procurement and Contracting Requirements",
       "01": "General Requirements",
-      "03": "Concrete",
-      "04": "Masonry",
-      "07": "Thermal and Moisture Protection"
+      "04": "Masonry"
     },
     "keywords": [
       "masonry",
