@@ -49,9 +49,17 @@ async def run_phase1(job_id: str) -> Dict:
         # Get division map from cache
         division_map = await get_division_map(file_hash)
         
-        # If no division map, run Phase 0 to build it
-        if not division_map or not division_map.get('divisions'):
-            print(f"🔍 No division map cached for {file_hash} - running Phase 0...")
+        # FIXED: Only treat as cached if map has actual divisions
+        # Empty dict {} should be treated as cache miss
+        has_valid_cache = (
+            division_map and 
+            isinstance(division_map, dict) and 
+            len(division_map) > 0
+        )
+        
+        # If no valid division map, run Phase 0 to build it
+        if not has_valid_cache:
+            print(f"🔍 No valid division map cached for {file_hash} - running Phase 0...")
             
             # Download PDF for Phase 0
             pdf_bytes = await get_document_from_storage(file_path)
@@ -63,12 +71,19 @@ async def run_phase1(job_id: str) -> Dict:
             # Get the newly created division map
             division_map = await get_division_map(file_hash)
             
+            # FIXED: Check for valid non-empty map
+            has_valid_cache = (
+                division_map and 
+                isinstance(division_map, dict) and 
+                len(division_map) > 0
+            )
+            
             # If Phase 0 still didn't create a valid map, use keyword fallback
-            if not division_map or not division_map.get('divisions'):
+            if not has_valid_cache:
                 print(f"⚠️  Phase 0 couldn't detect divisions - using keyword fallback")
                 return await extract_full_document_fallback(job_id, job, file_hash, trade_type)
         
-        print(f"✅ Using division map with {len(division_map.get('divisions', {}))} divisions detected")
+        print(f"✅ Using division map with {len(division_map)} divisions detected")
         
         # Load trade mappings to know which divisions to extract
         with open("trade_mappings.json", "r") as f:
