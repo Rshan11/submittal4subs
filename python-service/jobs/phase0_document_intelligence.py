@@ -54,22 +54,36 @@ async def run_phase0(file_hash: str, pdf_bytes: bytes) -> Dict:
                 
                 # Check if this looks like actual spec content (not TOC)
                 # TOC entries are usually short lines
-                # Actual division starts have "PART 1" or more content following
-                context = text[max(0, match.end()):match.end()+500]
+                # Actual division starts have more detailed content
+                context = text[max(0, match.end()):match.end()+1000]
                 
                 is_toc = False
                 # TOC indicators: short line, followed by dots or page numbers
-                if re.search(r'\.{3,}|\d{1,3}\s*$', context[:100]):
+                toc_line = context[:200]
+                if re.search(r'\.{3,}|\d{1,3}\s*$', toc_line):
                     is_toc = True
                 
-                # Real division start indicators
-                has_part1 = 'PART 1' in context or 'PART 2' in context or 'PART 3' in context
+                # Real division start indicators - be more flexible
+                has_part = 'PART' in context
                 has_section = 'SECTION' in context
                 has_general = 'GENERAL' in context
+                has_scope = 'SCOPE' in context
+                has_summary = 'SUMMARY' in context
+                has_related = 'RELATED' in context
+                has_products = 'PRODUCTS' in context
+                has_execution = 'EXECUTION' in context
                 
-                is_actual_division = has_part1 or (has_section and has_general)
+                # Check if context has substantial spec content (not just header)
+                has_substantial_content = len(context.strip()) > 300
                 
-                if is_actual_division and not is_toc:
+                # Division is real if it has spec structure keywords AND substantial content
+                is_actual_division = (
+                    (has_part or has_section or has_scope or has_products or has_execution) 
+                    and has_substantial_content
+                    and not is_toc
+                )
+                
+                if is_actual_division:
                     division_locations.append({
                         'division': div_number,
                         'page': page_num + 1,  # 1-indexed
