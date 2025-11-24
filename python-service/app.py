@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
-import fitz  # PyMuPDF
+import pdfplumber
 import os
 import re
 from typing import Optional
@@ -42,7 +42,6 @@ def find_division_04_pages(pdf_path: str) -> list[int]:
     
     Returns a list of ALL page numbers that contain Division 04 content.
     """
-    doc = fitz.open(pdf_path)
     matching_pages = []
     
     # Patterns to look for in headers/footers
@@ -55,30 +54,28 @@ def find_division_04_pages(pdf_path: str) -> list[int]:
         r'SECTION\s+04',      # "SECTION 04"
     ]
     
-    print(f"[INFO] Scanning {len(doc)} pages for Division 04 content...")
-    
-    for page_num in range(len(doc)):
-        page = doc[page_num]
-        full_text = page.get_text()
+    with pdfplumber.open(pdf_path) as pdf:
+        print(f"[INFO] Scanning {len(pdf.pages)} pages for Division 04 content...")
         
-        # Check first 200 characters (header area)
-        header = full_text[:200] if len(full_text) > 200 else full_text
-        
-        # Check last 200 characters (footer area)
-        footer = full_text[-200:] if len(full_text) > 200 else ""
-        
-        # Check if any pattern matches in header or footer
-        found = False
-        for pattern in patterns:
-            if re.search(pattern, header, re.IGNORECASE) or re.search(pattern, footer, re.IGNORECASE):
-                matching_pages.append(page_num)
-                found = True
-                break
-        
-        if found:
-            print(f"[FOUND] Page {page_num + 1} contains Division 04 markers")
-    
-    doc.close()
+        for page_num, page in enumerate(pdf.pages):
+            full_text = page.extract_text() or ""
+            
+            # Check first 200 characters (header area)
+            header = full_text[:200] if len(full_text) > 200 else full_text
+            
+            # Check last 200 characters (footer area)
+            footer = full_text[-200:] if len(full_text) > 200 else ""
+            
+            # Check if any pattern matches in header or footer
+            found = False
+            for pattern in patterns:
+                if re.search(pattern, header, re.IGNORECASE) or re.search(pattern, footer, re.IGNORECASE):
+                    matching_pages.append(page_num)
+                    found = True
+                    break
+            
+            if found:
+                print(f"[FOUND] Page {page_num + 1} contains Division 04 markers")
     
     if not matching_pages:
         raise ValueError("Could not find any Division 04 pages in specification")
@@ -88,7 +85,7 @@ def find_division_04_pages(pdf_path: str) -> list[int]:
 
 def extract_division_text(pdf_path: str, page_numbers: list[int]) -> str:
     """
-    Extract text from specified pages using PyMuPDF.
+    Extract text from specified pages using pdfplumber.
     
     Args:
         pdf_path: Path to the PDF file
@@ -97,15 +94,13 @@ def extract_division_text(pdf_path: str, page_numbers: list[int]) -> str:
     Returns:
         Combined text from all specified pages
     """
-    doc = fitz.open(pdf_path)
     text_parts = []
     
-    for page_num in page_numbers:
-        page = doc[page_num]
-        text = page.get_text()
-        text_parts.append(text)
-    
-    doc.close()
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num in page_numbers:
+            page = pdf.pages[page_num]
+            text = page.extract_text() or ""
+            text_parts.append(text)
     
     print(f"[INFO] Extracted {len(''.join(text_parts))} characters from {len(page_numbers)} pages")
     return "\n\n".join(text_parts)
@@ -181,8 +176,8 @@ async def analyze_specification(
         page_numbers = find_division_04_pages(temp_path)
         print(f"[INFO] Found {len(page_numbers)} Division 04 pages")
         
-        # Step 2: Extract text from those pages using PyMuPDF
-        print(f"[INFO] Extracting text with PyMuPDF...")
+        # Step 2: Extract text from those pages using pdfplumber
+        print(f"[INFO] Extracting text with pdfplumber...")
         division_text = extract_division_text(temp_path, page_numbers)
         
         # Step 3: Analyze with Gemini
