@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
-import pypdf
+import fitz  # PyMuPDF
 import os
 import re
 from typing import Optional
@@ -33,53 +33,81 @@ class AnalysisResponse(BaseModel):
     alternates: list
     summary: str
 
-def find_division_04_pages(pdf_path: str) -> tuple[int, int]:
-    """Scan PDF for Division 04 start/end pages using header patterns."""
-    reader = pypdf.PdfReader(pdf_path)
-    div_04_start = None
-    div_04_end = None
+def find_division_04_pages(pdf_path: str) -> list[int]:
+    """
+    Scan ALL pages for Division 04 content using header/footer scanning.
     
-    division_pattern = re.compile(r'DIVISION\s+(\d+)', re.IGNORECASE)
-    section_04_pattern = re.compile(r'SECTION\s+04', re.IGNORECASE)
+    This approach finds ALL pages containing Division 04 content by checking
+    the first 200 and last 200 characters of each page for Division 04 markers.
     
-    for page_num in range(len(reader.pages)):
-        page = reader.pages[page_num]
-        text = page.extract_text()
+    Returns a list of ALL page numbers that contain Division 04 content.
+    """
+    doc = fitz.open(pdf_path)
+    matching_pages = []
+    
+    # Patterns to look for in headers/footers
+    patterns = [
+        r'04\s*20',           # "04 20" or "04 2000"
+        r'04\s*2000',         # "04 2000"
+        r'UNIT\s+MASONRY',    # "UNIT MASONRY"
+        r'Division\s+04',     # "Division 04"
+        r'DIVISION\s+04',     # "DIVISION 04"
+        r'SECTION\s+04',      # "SECTION 04"
+    ]
+    
+    print(f"[INFO] Scanning {len(doc)} pages for Division 04 content...")
+    
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        full_text = page.get_text()
         
-        # Look for Division 04 start
-        if div_04_start is None:
-            if section_04_pattern.search(text) or re.search(r'\b04\s*\d{4}\b', text):
-                div_04_start = page_num
-                print(f"[FOUND] Division 04 starts at page {page_num + 1}")
+        # Check first 200 characters (header area)
+        header = full_text[:200] if len(full_text) > 200 else full_text
         
-        # Look for next division (Division 05+)
-        elif div_04_start is not None and div_04_end is None:
-            div_match = division_pattern.search(text)
-            if div_match:
-                div_num = int(div_match.group(1))
-                if div_num > 4:
-                    div_04_end = page_num - 1
-                    print(f"[FOUND] Division 04 ends at page {page_num} (Division {div_num} starts)")
-                    break
+        # Check last 200 characters (footer area)
+        footer = full_text[-200:] if len(full_text) > 200 else ""
+        
+        # Check if any pattern matches in header or footer
+        found = False
+        for pattern in patterns:
+            if re.search(pattern, header, re.IGNORECASE) or re.search(pattern, footer, re.IGNORECASE):
+                matching_pages.append(page_num)
+                found = True
+                break
+        
+        if found:
+            print(f"[FOUND] Page {page_num + 1} contains Division 04 markers")
     
-    if div_04_start is None:
-        raise ValueError("Could not find Division 04 in specification")
+    doc.close()
     
-    if div_04_end is None:
-        div_04_end = len(reader.pages) - 1
-        print(f"[INFO] Division 04 extends to end of document (page {div_04_end + 1})")
+    if not matching_pages:
+        raise ValueError("Could not find any Division 04 pages in specification")
     
-    return div_04_start, div_04_end
+    print(f"[INFO] Found {len(matching_pages)} pages with Division 04 content")
+    return matching_pages
 
-def extract_division_text(pdf_path: str, start_page: int, end_page: int) -> str:
-    """Extract text from specified page range."""
-    reader = pypdf.PdfReader(pdf_path)
+def extract_division_text(pdf_path: str, page_numbers: list[int]) -> str:
+    """
+    Extract text from specified pages using PyMuPDF.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        page_numbers: List of page numbers to extract (0-indexed)
+    
+    Returns:
+        Combined text from all specified pages
+    """
+    doc = fitz.open(pdf_path)
     text_parts = []
     
-    for page_num in range(start_page, end_page + 1):
-        page = reader.pages[page_num]
-        text_parts.append(page.extract_text())
+    for page_num in page_numbers:
+        page = doc[page_num]
+        text = page.get_text()
+        text_parts.append(text)
     
+    doc.close()
+    
+    print(f"[INFO] Extracted {len(''.join(text_parts))} characters from {len(page_numbers)} pages")
     return "\n\n".join(text_parts)
 
 def analyze_with_gemini(text: str, trade: str = "masonry") -> dict:
@@ -148,15 +176,14 @@ async def analyze_specification(
         f.write(content)
     
     try:
-        # Step 1: Find division pages
-        print(f"[INFO] Scanning for Division 04...")
-        start_page, end_page = find_division_04_pages(temp_path)
-        print(f"[INFO] Division 04: pages {start_page + 1} to {end_page + 1}")
+        # Step 1: Find division pages using header/footer scanning
+        print(f"[INFO] Scanning for Division 04 pages...")
+        page_numbers = find_division_04_pages(temp_path)
+        print(f"[INFO] Found {len(page_numbers)} Division 04 pages")
         
-        # Step 2: Extract text
-        print(f"[INFO] Extracting text...")
-        division_text = extract_division_text(temp_path, start_page, end_page)
-        print(f"[INFO] Extracted {len(division_text)} characters")
+        # Step 2: Extract text from those pages using PyMuPDF
+        print(f"[INFO] Extracting text with PyMuPDF...")
+        division_text = extract_division_text(temp_path, page_numbers)
         
         # Step 3: Analyze with Gemini
         print(f"[INFO] Analyzing with Gemini...")
