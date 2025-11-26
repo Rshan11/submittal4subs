@@ -297,12 +297,12 @@ async function analyzeDocument() {
         
         console.log('[PYTHON] Upload successful:', filePath);
         
-        // STEP 3: Call analyze-spec-python Edge Function
-        updateLoadingStatus('Starting analysis...', 20);
-        console.log('[PYTHON] Calling analyze-spec-python...');
-        
+        // STEP 3: Call analyze-spec-tiled Edge Function (tile-based analysis)
+        updateLoadingStatus('Analyzing specification (tile-based scanning)...', 20);
+        console.log('[TILED] Calling analyze-spec-tiled...');
+
         const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-python`,
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-tiled`,
             {
                 method: 'POST',
                 headers: {
@@ -310,102 +310,54 @@ async function analyzeDocument() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    fileHash: fileHash,
                     filePath: filePath,
-                    tradeType: selectedTrade,
-                    projectName: currentFile.name,
-                    userId: currentUser?.id
+                    trade: selectedTrade,
+                    projectName: currentFile.name
                 })
             }
         );
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error('[PYTHON] Error response:', errorData);
-            throw new Error(errorData.error || 'Analysis failed to start');
+            console.error('[TILED] Error response:', errorData);
+            throw new Error(errorData.error || 'Analysis failed');
         }
 
         const result = await response.json();
-        console.log('[PYTHON] Job submitted:', result);
-        
-        const jobId = result.jobId;
-        
-        // STEP 4: Poll for job completion
-        updateLoadingStatus('Processing specification (this may take 2-3 minutes)...', 30);
-        console.log('[PYTHON] Polling for job completion...');
-        
-        let jobComplete = false;
-        let attempts = 0;
-        const maxAttempts = 60; // 5 minutes max (5 second intervals)
-        
-        while (!jobComplete && attempts < maxAttempts) {
-            attempts++;
-            
-            // Wait 5 seconds between polls
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            
-            // Update progress
-            const progress = 30 + (attempts / maxAttempts) * 60;
-            updateLoadingStatus(`Processing specification... (${attempts * 5}s elapsed)`, progress);
-            
-            // Check job status
-            const statusResponse = await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-job-status?jobId=${jobId}`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                    }
-                }
-            );
-            
-            if (!statusResponse.ok) {
-                console.error('[PYTHON] Status check failed');
-                continue;
-            }
-            
-            const statusData = await statusResponse.json();
-            console.log('[PYTHON] Job status:', statusData.status);
-            
-            if (statusData.status === 'completed') {
-                jobComplete = true;
-                console.log('[PYTHON] Job completed!', statusData);
-                
-                // STEP 5: Format and display results
-                updateLoadingStatus('Formatting results...', 95);
-                
-                // Check if Phase 2 analysis is available
-                const hasPhase2 = statusData.phase2Analysis && 
-                                  (statusData.phase2Analysis.materials?.length > 0 ||
-                                   statusData.phase2Analysis.submittals?.length > 0 ||
-                                   statusData.phase2Analysis.coordination?.length > 0 ||
-                                   statusData.phase2Analysis.contract_terms?.length > 0);
-                
-                analysisResult = {
-                    contract: hasPhase2 ? formatPhase2ContractTerms(statusData.phase2Analysis.contract_terms) : {},
-                    tradeRequirements: formatPhase1Results(statusData.extractionData, statusData.phase2Analysis),
-                    coordination: hasPhase2 ? statusData.phase2Analysis.coordination : [],
-                    submittals: hasPhase2 ? statusData.phase2Analysis.submittals : [],
-                    phase2Data: statusData.phase2Analysis || null,
-                    metadata: {
-                        trade: selectedTrade,
-                        processingTime: statusData.result?.pages_processed || 0,
-                        jobId: jobId,
-                        hasPhase2: hasPhase2
-                    }
-                };
-                
-                updateLoadingStatus('Complete!', 100);
-                displayResults(analysisResult);
-                
-            } else if (statusData.status === 'failed') {
-                throw new Error(statusData.result?.error || 'Analysis failed');
-            }
-            // Otherwise keep polling (status is 'pending' or 'processing')
+        console.log('[TILED] Analysis complete:', result);
+
+        if (!result.success) {
+            throw new Error(result.error || 'Analysis failed');
         }
-        
-        if (!jobComplete) {
-            throw new Error('Analysis timed out. Please try again with a smaller specification.');
-        }
+
+        // STEP 4: Format and display results
+        updateLoadingStatus('Formatting results...', 95);
+
+        const analysis = result.analysis;
+
+        analysisResult = {
+            contract: formatTiledBusinessTerms(analysis.summary),
+            tradeRequirements: formatTiledMaterials(analysis.materials, analysis.execution),
+            coordination: analysis.coordination || [],
+            submittals: analysis.submittals || [],
+            exclusions: analysis.exclusions || [],
+            alternates: analysis.alternates || [],
+            qualityAssurance: analysis.quality_assurance || [],
+            summary: analysis.summary || {},
+            metadata: {
+                trade: selectedTrade,
+                division: result.division,
+                project: result.project,
+                processingTimeMs: result.metadata?.processingTimeMs,
+                tilesScanned: result.metadata?.tilesScanned,
+                tilesMatched: result.metadata?.tilesMatched,
+                totalPages: result.metadata?.totalPages,
+                divisionChars: result.metadata?.divisionChars
+            }
+        };
+
+        updateLoadingStatus('Complete!', 100);
+        displayResults(analysisResult);
         
     } catch (error) {
         console.error('[PYTHON] Analysis error:', error);
@@ -413,7 +365,60 @@ async function analyzeDocument() {
     }
 }
 
-// Helper function to format Phase 2 contract terms
+// Helper function to format tiled analysis business terms
+function formatTiledBusinessTerms(summary) {
+    if (!summary) return {};
+
+    return {
+        overview: summary.scope_overview || '',
+        keyMaterials: summary.key_materials || [],
+        criticalRequirements: summary.critical_requirements || [],
+        complexity: summary.estimated_complexity || 'MEDIUM',
+        bidConsiderations: summary.bid_considerations || []
+    };
+}
+
+// Helper function to format tiled analysis materials
+function formatTiledMaterials(materials, execution) {
+    let text = '';
+
+    if (materials && materials.length > 0) {
+        text += '# Materials\n\n';
+        materials.forEach(category => {
+            text += `## ${category.category || 'General'}\n\n`;
+            if (category.items && category.items.length > 0) {
+                category.items.forEach(item => {
+                    text += `- **${item.name || 'Item'}**`;
+                    if (item.specification) text += `: ${item.specification}`;
+                    if (item.manufacturer) text += ` (${item.manufacturer})`;
+                    if (item.notes) text += `\n  - *Note: ${item.notes}*`;
+                    text += '\n';
+                });
+            }
+            text += '\n';
+        });
+    }
+
+    if (execution && execution.length > 0) {
+        text += '# Execution Requirements\n\n';
+        execution.forEach(item => {
+            text += `## ${item.activity || 'Activity'}\n`;
+            if (item.requirements && item.requirements.length > 0) {
+                item.requirements.forEach(req => {
+                    text += `- ${req}\n`;
+                });
+            }
+            if (item.quality_standards) {
+                text += `- *Quality Standard: ${item.quality_standards}*\n`;
+            }
+            text += '\n';
+        });
+    }
+
+    return text || 'No materials data available.';
+}
+
+// Helper function to format Phase 2 contract terms (legacy)
 function formatPhase2ContractTerms(contractTerms) {
     if (!contractTerms || contractTerms.length === 0) {
         return {};
