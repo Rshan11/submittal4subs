@@ -51,24 +51,48 @@ def extract_all_text(pdf_path: str) -> tuple[str, int]:
     Extract ALL text from PDF. No division detection. No heuristics.
     Just dump everything into one giant string.
 
+    Memory-optimized: processes pages one at a time to avoid OOM.
+
     Returns: (full_text, page_count)
     """
-    text_parts = []
-    page_count = 0
+    import gc
 
+    # First pass: get page count without loading all pages
     with pdfplumber.open(pdf_path) as pdf:
         page_count = len(pdf.pages)
-        print(f"[EXTRACT] Processing {page_count} pages...")
 
-        for i, page in enumerate(pdf.pages):
-            page_text = page.extract_text() or ""
-            # Add page marker for debugging (optional, can be removed)
-            text_parts.append(f"\n--- PAGE {i + 1} ---\n{page_text}")
+    print(f"[EXTRACT] Processing {page_count} pages (memory-optimized)...")
 
-            if (i + 1) % 50 == 0:
-                print(f"[EXTRACT] Processed {i + 1}/{page_count} pages...")
+    # Process in batches to manage memory
+    BATCH_SIZE = 20
+    all_text_parts = []
 
-    full_text = "\n".join(text_parts)
+    for batch_start in range(0, page_count, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, page_count)
+        batch_text = []
+
+        # Open PDF fresh for each batch to release memory
+        with pdfplumber.open(pdf_path) as pdf:
+            for i in range(batch_start, batch_end):
+                page = pdf.pages[i]
+                page_text = page.extract_text() or ""
+                batch_text.append(f"\n--- PAGE {i + 1} ---\n{page_text}")
+                # Clear page resources
+                page.flush_cache()
+
+        # Join batch and add to results
+        all_text_parts.append("\n".join(batch_text))
+
+        print(f"[EXTRACT] Processed pages {batch_start + 1}-{batch_end}/{page_count}")
+
+        # Force garbage collection between batches
+        gc.collect()
+
+    full_text = "\n".join(all_text_parts)
+
+    # Clear the parts list to free memory
+    all_text_parts = None
+    gc.collect()
 
     # Normalize whitespace but preserve structure
     full_text = re.sub(r'[ \t]+', ' ', full_text)  # Collapse horizontal whitespace
