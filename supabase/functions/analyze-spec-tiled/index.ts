@@ -23,7 +23,7 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -190,8 +190,8 @@ async function scanTilesForDivision(
   trade: string
 ): Promise<MatchedTile[]> {
 
-  const BATCH_SIZE = 3; // Process 3 tiles concurrently (stay under rate limits)
-  const BATCH_DELAY_MS = 8000; // Wait 8 seconds between batches (10 req/min limit)
+  const BATCH_SIZE = 2; // Process 2 tiles concurrently
+  const BATCH_DELAY_MS = 10000; // Wait 10 seconds between batches (~12 req/min, under 15 limit)
   const matchingTiles: MatchedTile[] = [];
 
   for (let i = 0; i < tiles.length; i += BATCH_SIZE) {
@@ -355,79 +355,78 @@ async function analyzeDivisionContent(
     ? divisionText.substring(0, maxChars) + "\n\n[TRUNCATED - additional content not shown]"
     : divisionText;
 
-  const prompt = `You are a ${trade} contractor analyzing Division ${division} specifications for bidding.
+  const tradeEmoji = trade === 'masonry' ? '🧱' : trade === 'concrete' ? '🏗️' : '🔧';
+  const tradeName = trade.charAt(0).toUpperCase() + trade.slice(1);
+
+  const prompt = `You are a ${trade} contractor analyzing Division ${division} specifications. Create a CONDENSED, ACTIONABLE summary for bidding and field use.
 
 PROJECT: ${projectName || "Construction Project"}
 
 SPECIFICATION TEXT:
 ${textToAnalyze}
 
-Extract ALL relevant information for bidding. Return ONLY valid JSON:
+Format your response EXACTLY like this example (use markdown):
 
-{
-  "materials": [
-    {
-      "category": "Category name (e.g., Masonry Units, Mortar, Accessories)",
-      "items": [
-        {
-          "name": "Material name",
-          "specification": "Full spec (ASTM, size, type, grade, etc.)",
-          "manufacturer": "If specified, or null",
-          "notes": "Any special requirements"
-        }
-      ]
-    }
-  ],
-  "submittals": [
-    {
-      "type": "Product Data / Shop Drawings / Samples / Test Reports / etc.",
-      "description": "What must be submitted",
-      "timing": "Before/during/after installation",
-      "copies": "Number if specified"
-    }
-  ],
-  "execution": [
-    {
-      "activity": "Installation/preparation activity",
-      "requirements": ["Specific requirements"],
-      "quality_standards": "Tolerances, standards to meet"
-    }
-  ],
-  "quality_assurance": [
-    {
-      "requirement": "QA/QC requirement",
-      "standard": "ASTM, code reference",
-      "documentation": "What records needed"
-    }
-  ],
-  "coordination": [
-    {
-      "with_trade": "Other trade/division",
-      "item": "What needs coordination",
-      "responsibility": "Who does what"
-    }
-  ],
-  "exclusions": [
-    {
-      "item": "Work excluded or by others",
-      "responsible_party": "Who is responsible"
-    }
-  ],
-  "alternates": [
-    {
-      "number": "Alt number if given",
-      "description": "What the alternate is",
-      "impact": "Add/deduct/substitution"
-    }
-  ],
-  "summary": {
-    "scope_overview": "2-3 sentence scope summary",
-    "key_materials": ["Top 3-5 major materials"],
-    "critical_requirements": ["Most important requirements to note"],
-    "estimated_complexity": "LOW/MEDIUM/HIGH",
-    "bid_considerations": ["Key things to consider when bidding"]
-  }
-}`;
+${tradeEmoji} ${tradeName} Division Summary (Condensed Contractor Format)
+
+## 1. Materials
+
+### Masonry Units
+- **Thin Brick** — ASTM C1088, Grade Exterior
+- Provide all special shapes (no mitered corners; no saw-cut exposed faces)
+
+### Mortar
+- **Type M**, ASTM C270
+- Follow BIA Tech Notes #8
+- No cold-weather additives (no accelerators) allowed
+
+### Flashing
+**Metal Flashing Options:**
+- Stainless Steel (ASTM A240, Type 304, 0.016")
+- Copper (ASTM B370, 12–16 oz)
+- Galvanized Steel (ASTM A653, 24 ga)
+
+**Flexible Flashings:**
+- Rubberized asphalt or elastomeric thermoplastic sheet
+- Thickness 0.025"–0.040"
+
+### Accessories
+- **Weepholes/Vents**: 3/8" × 1/2" × 4"
+- **Expansion Joints**: Neoprene filler (ASTM D1056), backer rod 25% wider than joint
+- **Weather Barriers**: Minimum 15# felt (ASTM D226)
+
+## 2. Execution Requirements
+
+### Cold Weather (Below 40°F)
+- Follow ACI 530.1 cold-weather procedures
+- No antifreeze/salts in mortar
+- Requires Purchaser approval
+
+### Hot Weather (Above 100°F or 90°F with wind)
+- Follow ACI 530.1 hot-weather procedures
+- Wet surfaces before laying
+- Fog spray 3× daily for first 3 days
+
+### Mortar Joints
+- **3/8" typical**
+- Full bed and head joints
+- Exposed: concave finish | Non-exposed: cut flush
+
+### Quality Standards
+- Tolerances per ACI 530.1
+- Repoint all defective work
+- Protect adjacent materials from overspray
+
+---
+
+RULES:
+1. Be CONCISE - use bullet points, not paragraphs
+2. BOLD the key specs (ASTM numbers, dimensions, types)
+3. Group related items under clear headers
+4. Include ALL ASTM/standard references found
+5. Note any special restrictions (no X allowed, requires approval, etc.)
+6. Skip sections if not found in the spec (don't make up content)
+7. Use em-dashes (—) to separate item names from specs`;
 
   const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
@@ -453,7 +452,13 @@ Extract ALL relevant information for bidding. Return ONLY valid JSON:
     throw new Error("No response from Gemini analysis");
   }
 
-  return parseJSON(resultText);
+  // Return markdown summary as the main result
+  return {
+    summary: resultText,
+    format: "markdown",
+    trade: trade,
+    division: division
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════

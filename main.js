@@ -771,31 +771,41 @@ function extractSubmittalsFromMaterials(materials) {
 
 function displayResults(analysis) {
     let html = '';
-    
-    // SIMPLIFIED TABS - 3 tabs only
+
+    // Check if this is the new condensed markdown format
+    if (analysis.format === 'markdown' && analysis.summary) {
+        html += '<div class="condensed-summary">';
+        html += convertMarkdownToHTML(analysis.summary);
+        html += '</div>';
+        resultsContent.innerHTML = html;
+        showSection('results');
+        return;
+    }
+
+    // Legacy format with tabs
     html += '<div class="results-tabs">';
     html += '<button class="tab active" onclick="showTab(\'contract\')">📄 Contract Terms</button>';
     html += '<button class="tab" onclick="showTab(\'trade\')">🔨 Trade Requirements</button>';
     html += '<button class="tab" onclick="showTab(\'coordination\')">🤝 Coordination</button>';
     html += '</div>';
-    
+
     // Format content
     const contractText = formatContractForDisplay(analysis.contract);
     const tradeText = typeof analysis.tradeRequirements === 'string' ? analysis.tradeRequirements : '';
     const coordHTML = formatCoordinationForDisplay(analysis.coordination);
-    
+
     html += '<div id="tab-contract" class="tab-content active">';
     html += convertMarkdownToHTML(contractText);
     html += '</div>';
-    
+
     html += '<div id="tab-trade" class="tab-content">';
     html += convertMarkdownToHTML(tradeText);
     html += '</div>';
-    
+
     html += '<div id="tab-coordination" class="tab-content" style="white-space: normal !important; word-break: normal !important;">';
     html += coordHTML;  // Already HTML, don't convert!
     html += '</div>';
-    
+
     resultsContent.innerHTML = html;
     showSection('results');
 }
