@@ -1,7 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
 import pdfplumber
 import os
 import re
@@ -18,186 +17,194 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set")
+# ═══════════════════════════════════════════════════════════════
+# TILE-BASED SPEC EXTRACTION
+# ═══════════════════════════════════════════════════════════════
+#
+# Strategy: Don't try to detect divisions with Python.
+# Just extract ALL text and tile it. Let Gemini find divisions.
+#
+# 1. Extract full text (dumb extraction, no heuristics)
+# 2. Tile into 50K char chunks with 5K overlap
+# 3. Return tiles to caller for Gemini scanning
+# ═══════════════════════════════════════════════════════════════
 
-genai.configure(api_key=GEMINI_API_KEY)
+# Configuration
+TILE_SIZE = 50000       # 50K characters per tile
+TILE_OVERLAP = 5000     # 5K character overlap between tiles
 
-class AnalysisResponse(BaseModel):
-    materials: list
-    submittals: list
-    coordination: list
-    exclusions: list
-    alternates: list
-    summary: str
+class TileResponse(BaseModel):
+    total_chars: int
+    total_pages: int
+    tile_count: int
+    tile_size: int
+    tile_overlap: int
+    tiles: list[dict]  # [{index, start, end, text}]
 
-def find_division_04_pages(pdf_path: str) -> list[int]:
+class ExtractResponse(BaseModel):
+    total_chars: int
+    total_pages: int
+    text: str
+
+def extract_all_text(pdf_path: str) -> tuple[str, int]:
     """
-    Scan ALL pages for Division 04 content using header/footer scanning.
-    
-    This approach finds ALL pages containing Division 04 content by checking
-    the first 200 and last 200 characters of each page for Division 04 markers.
-    
-    Returns a list of ALL page numbers that contain Division 04 content.
-    """
-    matching_pages = []
-    
-    # Patterns to look for in headers/footers
-    patterns = [
-        r'04\s*20',           # "04 20" or "04 2000"
-        r'04\s*2000',         # "04 2000"
-        r'UNIT\s+MASONRY',    # "UNIT MASONRY"
-        r'Division\s+04',     # "Division 04"
-        r'DIVISION\s+04',     # "DIVISION 04"
-        r'SECTION\s+04',      # "SECTION 04"
-    ]
-    
-    with pdfplumber.open(pdf_path) as pdf:
-        print(f"[INFO] Scanning {len(pdf.pages)} pages for Division 04 content...")
-        
-        for page_num, page in enumerate(pdf.pages):
-            full_text = page.extract_text() or ""
-            
-            # Check first 200 characters (header area)
-            header = full_text[:200] if len(full_text) > 200 else full_text
-            
-            # Check last 200 characters (footer area)
-            footer = full_text[-200:] if len(full_text) > 200 else ""
-            
-            # Check if any pattern matches in header or footer
-            found = False
-            for pattern in patterns:
-                if re.search(pattern, header, re.IGNORECASE) or re.search(pattern, footer, re.IGNORECASE):
-                    matching_pages.append(page_num)
-                    found = True
-                    break
-            
-            if found:
-                print(f"[FOUND] Page {page_num + 1} contains Division 04 markers")
-    
-    if not matching_pages:
-        raise ValueError("Could not find any Division 04 pages in specification")
-    
-    print(f"[INFO] Found {len(matching_pages)} pages with Division 04 content")
-    return matching_pages
+    Extract ALL text from PDF. No division detection. No heuristics.
+    Just dump everything into one giant string.
 
-def extract_division_text(pdf_path: str, page_numbers: list[int]) -> str:
-    """
-    Extract text from specified pages using pdfplumber.
-    
-    Args:
-        pdf_path: Path to the PDF file
-        page_numbers: List of page numbers to extract (0-indexed)
-    
-    Returns:
-        Combined text from all specified pages
+    Returns: (full_text, page_count)
     """
     text_parts = []
-    
+    page_count = 0
+
     with pdfplumber.open(pdf_path) as pdf:
-        for page_num in page_numbers:
-            page = pdf.pages[page_num]
-            text = page.extract_text() or ""
-            text_parts.append(text)
-    
-    print(f"[INFO] Extracted {len(''.join(text_parts))} characters from {len(page_numbers)} pages")
-    return "\n\n".join(text_parts)
+        page_count = len(pdf.pages)
+        print(f"[EXTRACT] Processing {page_count} pages...")
 
-def analyze_with_gemini(text: str, trade: str = "masonry") -> dict:
-    """Send text to Gemini for analysis."""
-    
-    prompt = f"""You are analyzing construction specifications for a {trade} contractor.
+        for i, page in enumerate(pdf.pages):
+            page_text = page.extract_text() or ""
+            # Add page marker for debugging (optional, can be removed)
+            text_parts.append(f"\n--- PAGE {i + 1} ---\n{page_text}")
 
-Extract the following information from the specification text:
+            if (i + 1) % 50 == 0:
+                print(f"[EXTRACT] Processed {i + 1}/{page_count} pages...")
 
-1. MATERIALS - List all {trade} materials specified (brick types, mortar, CMU, stone, etc.)
-2. SUBMITTALS - List all required submittals (product data, samples, test reports, etc.)
-3. COORDINATION - List coordination requirements with other trades
-4. EXCLUSIONS - List any work explicitly excluded or by others
-5. ALTERNATES - List any alternate materials or methods mentioned
+    full_text = "\n".join(text_parts)
 
-Return ONLY a JSON object with this structure:
-{{
-  "materials": ["item 1", "item 2"],
-  "submittals": ["item 1", "item 2"],
-  "coordination": ["item 1", "item 2"],
-  "exclusions": ["item 1", "item 2"],
-  "alternates": ["item 1", "item 2"],
-  "summary": "Brief 2-3 sentence overview of the scope"
-}}
+    # Normalize whitespace but preserve structure
+    full_text = re.sub(r'[ \t]+', ' ', full_text)  # Collapse horizontal whitespace
+    full_text = re.sub(r'\n{4,}', '\n\n\n', full_text)  # Max 3 newlines
 
-SPECIFICATION TEXT:
-{text}
-"""
-    
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-    response = model.generate_content(prompt)
-    
-    # Parse JSON from response
-    import json
-    response_text = response.text.strip()
-    
-    # Remove markdown code blocks if present
-    if response_text.startswith("```json"):
-        response_text = response_text[7:]
-    if response_text.startswith("```"):
-        response_text = response_text[3:]
-    if response_text.endswith("```"):
-        response_text = response_text[:-3]
-    
-    return json.loads(response_text.strip())
+    print(f"[EXTRACT] Complete: {len(full_text):,} chars from {page_count} pages")
+    return full_text, page_count
 
-@app.post("/analyze")
-async def analyze_specification(
-    file: UploadFile = File(...),
-    trade: str = "masonry"
-) -> AnalysisResponse:
+def tile_text(text: str, tile_size: int = TILE_SIZE, overlap: int = TILE_OVERLAP) -> list[dict]:
     """
-    Analyze a construction specification PDF.
-    
-    Process:
-    1. Find Division 04 pages using header scanning
-    2. Extract text from those pages
-    3. Send to Gemini for analysis
-    4. Return structured results
+    Slice text into overlapping tiles.
+
+    Example with tile_size=50000, overlap=5000:
+    - Tile 0: chars 0-50000
+    - Tile 1: chars 45000-95000
+    - Tile 2: chars 90000-140000
+    - etc.
+
+    Overlap ensures we don't cut division headers in half.
     """
-    
-    # Save uploaded file temporarily
+    tiles = []
+    text_len = len(text)
+
+    if text_len == 0:
+        return tiles
+
+    # Calculate step (tile_size minus overlap)
+    step = tile_size - overlap
+
+    start = 0
+    index = 0
+
+    while start < text_len:
+        end = min(start + tile_size, text_len)
+        tile_text = text[start:end]
+
+        tiles.append({
+            "index": index,
+            "start": start,
+            "end": end,
+            "char_count": len(tile_text),
+            "text": tile_text
+        })
+
+        index += 1
+        start += step
+
+        # Don't create tiny trailing tiles
+        if text_len - start < overlap:
+            break
+
+    print(f"[TILE] Created {len(tiles)} tiles from {text_len:,} chars")
+    return tiles
+
+# ═══════════════════════════════════════════════════════════════
+# API ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+@app.post("/extract", response_model=ExtractResponse)
+async def extract_text(file: UploadFile = File(...)):
+    """
+    Extract ALL text from PDF. No tiling, just raw text.
+    Use this if you want to handle tiling elsewhere.
+    """
     temp_path = f"/tmp/{file.filename}"
-    with open(temp_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
-    
+
     try:
-        # Step 1: Find division pages using header/footer scanning
-        print(f"[INFO] Scanning for Division 04 pages...")
-        page_numbers = find_division_04_pages(temp_path)
-        print(f"[INFO] Found {len(page_numbers)} Division 04 pages")
-        
-        # Step 2: Extract text from those pages using pdfplumber
-        print(f"[INFO] Extracting text with pdfplumber...")
-        division_text = extract_division_text(temp_path, page_numbers)
-        
-        # Step 3: Analyze with Gemini
-        print(f"[INFO] Analyzing with Gemini...")
-        analysis = analyze_with_gemini(division_text, trade)
-        print(f"[INFO] Analysis complete")
-        
-        return AnalysisResponse(**analysis)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        full_text, page_count = extract_all_text(temp_path)
+
+        return ExtractResponse(
+            total_chars=len(full_text),
+            total_pages=page_count,
+            text=full_text
+        )
+
     finally:
-        # Cleanup
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+@app.post("/extract-tiles", response_model=TileResponse)
+async def extract_and_tile(
+    file: UploadFile = File(...),
+    tile_size: int = Form(default=TILE_SIZE),
+    tile_overlap: int = Form(default=TILE_OVERLAP)
+):
+    """
+    Extract ALL text from PDF and tile it.
+
+    This is the main endpoint for the tiling strategy:
+    1. Extracts all text (no division detection)
+    2. Tiles into chunks with overlap
+    3. Returns tiles for Gemini scanning
+
+    Query params:
+    - tile_size: Characters per tile (default 50000)
+    - tile_overlap: Overlap between tiles (default 5000)
+    """
+    temp_path = f"/tmp/{file.filename}"
+
+    try:
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        # Step 1: Extract all text
+        full_text, page_count = extract_all_text(temp_path)
+
+        # Step 2: Tile it
+        tiles = tile_text(full_text, tile_size, tile_overlap)
+
+        return TileResponse(
+            total_chars=len(full_text),
+            total_pages=page_count,
+            tile_count=len(tiles),
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+            tiles=tiles
+        )
+
+    finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "2.0-simple"}
+    return {
+        "status": "healthy",
+        "version": "3.0-tiled",
+        "strategy": "tile-based extraction",
+        "tile_size": TILE_SIZE,
+        "tile_overlap": TILE_OVERLAP
+    }
 
 if __name__ == "__main__":
     import uvicorn
