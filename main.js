@@ -487,27 +487,50 @@ async function analyzeDocument() {
 
         const analysis = result.analysis;
 
-        analysisResult = {
-            contract: formatTiledBusinessTerms(analysis.summary),
-            tradeRequirements: formatTiledMaterials(analysis.materials, analysis.execution),
-            coordination: analysis.coordination || [],
-            submittals: analysis.submittals || [],
-            exclusions: analysis.exclusions || [],
-            alternates: analysis.alternates || [],
-            qualityAssurance: analysis.quality_assurance || [],
-            summary: analysis.summary || {},
-            metadata: {
-                trade: selectedTrade,
-                division: result.division,
-                project: result.project,
-                processingTimeMs: result.metadata?.processingTimeMs,
-                tilesScanned: result.metadata?.tilesScanned,
-                tilesMatched: result.metadata?.tilesMatched,
-                totalPages: result.metadata?.totalPages,
-                totalChars: result.metadata?.totalChars,
-                divisionChars: result.metadata?.divisionChars
-            }
-        };
+        // Check if this is the new condensed markdown format
+        if (analysis.format === 'markdown' && analysis.summary) {
+            // New format: pass markdown directly
+            analysisResult = {
+                format: 'markdown',
+                summary: analysis.summary,
+                trade: analysis.trade,
+                division: analysis.division,
+                metadata: {
+                    trade: selectedTrade,
+                    division: result.division,
+                    project: result.project,
+                    processingTimeMs: result.metadata?.processingTimeMs,
+                    tilesScanned: result.metadata?.tilesScanned,
+                    tilesMatched: result.metadata?.tilesMatched,
+                    totalPages: result.metadata?.totalPages,
+                    totalChars: result.metadata?.totalChars,
+                    divisionChars: result.metadata?.divisionChars
+                }
+            };
+        } else {
+            // Legacy format: transform the data
+            analysisResult = {
+                contract: formatTiledBusinessTerms(analysis.summary),
+                tradeRequirements: formatTiledMaterials(analysis.materials, analysis.execution),
+                coordination: analysis.coordination || [],
+                submittals: analysis.submittals || [],
+                exclusions: analysis.exclusions || [],
+                alternates: analysis.alternates || [],
+                qualityAssurance: analysis.quality_assurance || [],
+                summary: analysis.summary || {},
+                metadata: {
+                    trade: selectedTrade,
+                    division: result.division,
+                    project: result.project,
+                    processingTimeMs: result.metadata?.processingTimeMs,
+                    tilesScanned: result.metadata?.tilesScanned,
+                    tilesMatched: result.metadata?.tilesMatched,
+                    totalPages: result.metadata?.totalPages,
+                    totalChars: result.metadata?.totalChars,
+                    divisionChars: result.metadata?.divisionChars
+                }
+            };
+        }
 
         updateLoadingStatus('Complete!', 100);
         displayResults(analysisResult);
