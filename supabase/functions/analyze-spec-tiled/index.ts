@@ -2,20 +2,23 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ═══════════════════════════════════════════════════════════════
-// TILE-BASED SPEC ANALYSIS
+// TILE-BASED SPEC ANALYSIS v4.0 - CLIENT-SIDE EXTRACTION
 // ═══════════════════════════════════════════════════════════════
 //
-// Strategy:
-// 1. Get PDF tiles from Python service (dumb extraction)
-// 2. Scan each tile with Gemini: "Is Division X here?"
-// 3. Stitch matching tiles together
-// 4. ONE final Gemini analysis on clean division text
+// New flow (no Python service needed!):
+// 1. Client extracts PDF text with pdf.js (in browser)
+// 2. Client tiles the text into 50K chunks
+// 3. Client sends tiles to this Edge Function
+// 4. We scan each tile with Gemini: "Is Division X here?"
+// 5. Stitch matching tiles together
+// 6. ONE final Gemini analysis on clean division text
 //
-// Cost: ~$0.001-0.004 per tile scan + ~$0.01-0.05 final analysis
-// Much cheaper than sending 500K chars in one call
+// Benefits:
+// - No server memory issues (browser does extraction)
+// - No Render costs
+// - Scales infinitely
 // ═══════════════════════════════════════════════════════════════
 
-const PYTHON_SERVICE_URL = Deno.env.get("PYTHON_SERVICE_URL");
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -56,8 +59,7 @@ const DIVISION_PATTERNS: Record<string, { division: string; keywords: string[] }
   }
 };
 
-console.log("[BOOT] Tile-based Spec Analyzer v3.0");
-console.log("[BOOT] PYTHON_SERVICE:", PYTHON_SERVICE_URL ? "✓" : "✗");
+console.log("[BOOT] Tile-based Spec Analyzer v4.0 (Client-Side Extraction)");
 console.log("[BOOT] GEMINI:", GEMINI_API_KEY ? "✓" : "✗");
 
 serve(async (req) => {
@@ -68,92 +70,70 @@ serve(async (req) => {
   const startTime = Date.now();
 
   try {
-    const { filePath, trade, jobId, projectName } = await req.json();
+    const body = await req.json();
+    const { tiles, trade, jobId, projectName, totalPages, totalChars } = body;
 
-    if (!filePath) return jsonResp({ error: "Missing filePath" }, 400);
-    if (!trade) return jsonResp({ error: "Missing trade" }, 400);
-    if (!PYTHON_SERVICE_URL) return jsonResp({ error: "PYTHON_SERVICE_URL not configured" }, 500);
-    if (!GEMINI_API_KEY) return jsonResp({ error: "GEMINI_API_KEY not configured" }, 500);
+    // Validate required fields
+    if (!tiles || !Array.isArray(tiles) || tiles.length === 0) {
+      return jsonResp({ error: "Missing or empty tiles array" }, 400);
+    }
+    if (!trade) {
+      return jsonResp({ error: "Missing trade" }, 400);
+    }
+    if (!GEMINI_API_KEY) {
+      return jsonResp({ error: "GEMINI_API_KEY not configured" }, 500);
+    }
 
     const tradeConfig = DIVISION_PATTERNS[trade.toLowerCase()];
     if (!tradeConfig) {
-      return jsonResp({ error: `Unknown trade: ${trade}. Supported: ${Object.keys(DIVISION_PATTERNS).join(", ")}` }, 400);
+      return jsonResp({
+        error: `Unknown trade: ${trade}. Supported: ${Object.keys(DIVISION_PATTERNS).join(", ")}`
+      }, 400);
     }
 
     console.log(`\n${"═".repeat(50)}`);
     console.log(`PROJECT: ${projectName || "Unnamed"}`);
     console.log(`TRADE: ${trade} (Division ${tradeConfig.division})`);
-    console.log(`FILE: ${filePath}`);
+    console.log(`TILES: ${tiles.length} (${totalChars?.toLocaleString() || "?"} chars from ${totalPages || "?"} pages)`);
     console.log(`${"═".repeat(50)}\n`);
 
-    // Step 1: Download PDF from Supabase Storage
-    console.log("[STEP 1] Downloading PDF from storage...");
-    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
-    const { data: fileData, error: downloadError } = await supabase
-      .storage
-      .from("specifications")
-      .download(filePath);
-
-    if (downloadError || !fileData) {
-      throw new Error(`Failed to download PDF: ${downloadError?.message}`);
-    }
-    console.log(`[STEP 1] ✓ Downloaded ${(fileData.size / 1024).toFixed(1)} KB`);
-
-    // Step 2: Send to Python service for tiling
-    console.log("[STEP 2] Extracting and tiling PDF...");
-    const formData = new FormData();
-    formData.append("file", fileData, filePath.split("/").pop() || "spec.pdf");
-
-    const tilesResponse = await fetch(`${PYTHON_SERVICE_URL}/extract-tiles`, {
-      method: "POST",
-      body: formData
-    });
-
-    if (!tilesResponse.ok) {
-      const errText = await tilesResponse.text();
-      throw new Error(`Python service error: ${tilesResponse.status} - ${errText}`);
-    }
-
-    const tilesData = await tilesResponse.json();
-    console.log(`[STEP 2] ✓ ${tilesData.tile_count} tiles from ${tilesData.total_pages} pages (${tilesData.total_chars.toLocaleString()} chars)`);
-
-    // Step 3: Scan tiles for target division (parallel, batched)
-    console.log(`[STEP 3] Scanning tiles for Division ${tradeConfig.division}...`);
-    const matchingTiles = await scanTilesForDivision(tilesData.tiles, tradeConfig, trade);
-    console.log(`[STEP 3] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`);
+    // Step 1: Scan tiles for target division (parallel, batched)
+    console.log(`[STEP 1] Scanning ${tiles.length} tiles for Division ${tradeConfig.division}...`);
+    const matchingTiles = await scanTilesForDivision(tiles, tradeConfig, trade);
+    console.log(`[STEP 1] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`);
 
     if (matchingTiles.length === 0) {
       return jsonResp({
         success: false,
         error: `No Division ${tradeConfig.division} (${trade}) content found in specification`,
         metadata: {
-          tilesScanned: tilesData.tile_count,
-          totalPages: tilesData.total_pages
+          tilesScanned: tiles.length,
+          totalPages: totalPages
         }
       }, 404);
     }
 
-    // Step 4: Stitch matching tiles
-    console.log("[STEP 4] Stitching matching tiles...");
+    // Step 2: Stitch matching tiles
+    console.log("[STEP 2] Stitching matching tiles...");
     const divisionText = stitchTiles(matchingTiles);
-    console.log(`[STEP 4] ✓ Stitched ${divisionText.length.toLocaleString()} chars of Division ${tradeConfig.division} content`);
+    console.log(`[STEP 2] ✓ Stitched ${divisionText.length.toLocaleString()} chars of Division ${tradeConfig.division} content`);
 
-    // Step 5: Final analysis with Gemini
-    console.log("[STEP 5] Analyzing division content with Gemini...");
+    // Step 3: Final analysis with Gemini
+    console.log("[STEP 3] Analyzing division content with Gemini...");
     const analysis = await analyzeDivisionContent(divisionText, trade, tradeConfig.division, projectName);
-    console.log("[STEP 5] ✓ Analysis complete");
+    console.log("[STEP 3] ✓ Analysis complete");
 
-    // Step 6: Save results if jobId provided
-    if (jobId) {
-      console.log("[STEP 6] Saving results to database...");
+    // Step 4: Save results if jobId provided
+    if (jobId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      console.log("[STEP 4] Saving results to database...");
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
       await saveResults(supabase, jobId, analysis, {
-        tilesScanned: tilesData.tile_count,
+        tilesScanned: tiles.length,
         tilesMatched: matchingTiles.length,
-        totalPages: tilesData.total_pages,
+        totalPages: totalPages,
         divisionChars: divisionText.length
       });
-      console.log("[STEP 6] ✓ Results saved");
+      console.log("[STEP 4] ✓ Results saved");
     }
 
     const processingTime = Date.now() - startTime;
@@ -169,9 +149,10 @@ serve(async (req) => {
       analysis,
       metadata: {
         processingTimeMs: processingTime,
-        tilesScanned: tilesData.tile_count,
+        tilesScanned: tiles.length,
         tilesMatched: matchingTiles.length,
-        totalPages: tilesData.total_pages,
+        totalPages: totalPages,
+        totalChars: totalChars,
         divisionChars: divisionText.length
       }
     });
@@ -190,14 +171,27 @@ serve(async (req) => {
 // TILE SCANNING
 // ═══════════════════════════════════════════════════════════════
 
+interface Tile {
+  index: number;
+  start: number;
+  end: number;
+  text: string;
+  char_count?: number;
+}
+
+interface MatchedTile extends Tile {
+  divisionStart?: number;
+  divisionEnd?: number;
+}
+
 async function scanTilesForDivision(
-  tiles: Array<{ index: number; start: number; end: number; text: string }>,
+  tiles: Tile[],
   tradeConfig: { division: string; keywords: string[] },
   trade: string
-): Promise<Array<{ index: number; start: number; end: number; text: string; divisionStart?: number; divisionEnd?: number }>> {
+): Promise<MatchedTile[]> {
 
   const BATCH_SIZE = 5; // Process 5 tiles concurrently
-  const matchingTiles: Array<{ index: number; start: number; end: number; text: string; divisionStart?: number; divisionEnd?: number }> = [];
+  const matchingTiles: MatchedTile[] = [];
 
   for (let i = 0; i < tiles.length; i += BATCH_SIZE) {
     const batch = tiles.slice(i, i + BATCH_SIZE);
@@ -223,10 +217,10 @@ async function scanTilesForDivision(
 }
 
 async function scanSingleTile(
-  tile: { index: number; start: number; end: number; text: string },
+  tile: Tile,
   tradeConfig: { division: string; keywords: string[] },
   trade: string
-): Promise<{ hasContent: boolean; tile: typeof tile & { divisionStart?: number; divisionEnd?: number } }> {
+): Promise<{ hasContent: boolean; tile: MatchedTile }> {
 
   const prompt = `You are scanning a construction specification document for Division ${tradeConfig.division} (${trade}) content.
 
@@ -309,16 +303,14 @@ If no Division ${tradeConfig.division} content, return:
 // TILE STITCHING
 // ═══════════════════════════════════════════════════════════════
 
-function stitchTiles(
-  tiles: Array<{ index: number; start: number; end: number; text: string; divisionStart?: number; divisionEnd?: number }>
-): string {
+function stitchTiles(tiles: MatchedTile[]): string {
   if (tiles.length === 0) return "";
   if (tiles.length === 1) return tiles[0].text;
 
   // For consecutive tiles, we need to handle overlap
   // The overlap region exists in both tiles, so we skip it in the second tile
 
-  const OVERLAP = 5000; // Must match Python service
+  const OVERLAP = 5000; // Must match client-side TILE_OVERLAP
   let result = tiles[0].text;
 
   for (let i = 1; i < tiles.length; i++) {
@@ -350,7 +342,7 @@ async function analyzeDivisionContent(
   projectName?: string
 ): Promise<Record<string, unknown>> {
 
-  // Limit text size for final analysis (Gemini can handle ~1M tokens but let's be reasonable)
+  // Limit text size for final analysis
   const maxChars = 200000;
   const textToAnalyze = divisionText.length > maxChars
     ? divisionText.substring(0, maxChars) + "\n\n[TRUNCATED - additional content not shown]"

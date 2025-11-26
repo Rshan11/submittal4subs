@@ -6,6 +6,100 @@ import { supabase } from './lib/supabase.js';
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
+// ============================================================================
+// CLIENT-SIDE PDF EXTRACTION (no server needed!)
+// ============================================================================
+const TILE_SIZE = 50000;    // 50K characters per tile
+const TILE_OVERLAP = 5000;  // 5K overlap to avoid cutting sections
+
+/**
+ * Extract all text from PDF using pdf.js (runs in browser)
+ * @param {File} file - The PDF file
+ * @param {Function} onProgress - Progress callback (0-100)
+ * @returns {Promise<{text: string, pageCount: number}>}
+ */
+async function extractPdfText(file, onProgress = () => {}) {
+    console.log('[PDF.js] Starting client-side extraction...');
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pageCount = pdf.numPages;
+
+    console.log(`[PDF.js] Processing ${pageCount} pages...`);
+
+    const textParts = [];
+
+    for (let i = 1; i <= pageCount; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+
+        // Extract text items and join them
+        const pageText = textContent.items
+            .map(item => item.str)
+            .join(' ');
+
+        textParts.push(`\n--- PAGE ${i} ---\n${pageText}`);
+
+        // Report progress
+        const progress = Math.round((i / pageCount) * 100);
+        onProgress(progress);
+
+        if (i % 50 === 0) {
+            console.log(`[PDF.js] Processed ${i}/${pageCount} pages`);
+        }
+    }
+
+    let fullText = textParts.join('\n');
+
+    // Normalize whitespace
+    fullText = fullText.replace(/[ \t]+/g, ' ');
+    fullText = fullText.replace(/\n{4,}/g, '\n\n\n');
+
+    console.log(`[PDF.js] Complete: ${fullText.length.toLocaleString()} chars from ${pageCount} pages`);
+
+    return { text: fullText, pageCount };
+}
+
+/**
+ * Tile text into overlapping chunks for Gemini processing
+ * @param {string} text - Full extracted text
+ * @param {number} tileSize - Characters per tile
+ * @param {number} overlap - Overlap between tiles
+ * @returns {Array<{index: number, start: number, end: number, text: string}>}
+ */
+function tileText(text, tileSize = TILE_SIZE, overlap = TILE_OVERLAP) {
+    const tiles = [];
+    const textLen = text.length;
+
+    if (textLen === 0) return tiles;
+
+    const step = tileSize - overlap;
+    let start = 0;
+    let index = 0;
+
+    while (start < textLen) {
+        const end = Math.min(start + tileSize, textLen);
+        const tileText = text.substring(start, end);
+
+        tiles.push({
+            index,
+            start,
+            end,
+            char_count: tileText.length,
+            text: tileText
+        });
+
+        index++;
+        start += step;
+
+        // Don't create tiny trailing tiles
+        if (textLen - start < overlap) break;
+    }
+
+    console.log(`[TILE] Created ${tiles.length} tiles from ${textLen.toLocaleString()} chars`);
+    return tiles;
+}
+
 // Get URL parameters for job context
 const urlParams = new URLSearchParams(window.location.search);
 const jobId = urlParams.get('job_id');
@@ -249,14 +343,14 @@ async function calculateFileHash(file) {
 }
 
 // ============================================================================
-// MAIN ANALYSIS FUNCTION - Python Service Integration
+// MAIN ANALYSIS FUNCTION - Client-Side Extraction (no Python server needed!)
 // ============================================================================
 async function analyzeDocument() {
     if (!currentFile) {
         showError('No file selected');
         return;
     }
-    
+
     if (!selectedTrade) {
         showError('Please select a trade first');
         return;
@@ -270,36 +364,30 @@ async function analyzeDocument() {
 
     showSection('loading');
     analysisStartTime = Date.now();
-    updateLoadingStatus('Calculating file hash...', 5);
 
     try {
-        // STEP 1: Calculate file hash for caching
-        console.log('[PYTHON] Calculating file hash...');
-        const fileHash = await calculateFileHash(currentFile);
-        console.log('[PYTHON] File hash:', fileHash);
-        
-        // STEP 2: Upload PDF to Supabase Storage
-        updateLoadingStatus('Uploading PDF to storage...', 10);
-        console.log('[PYTHON] Uploading to Supabase Storage...');
-        
-        const filePath = `specifications/${fileHash}/${currentFile.name}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('specifications')
-            .upload(filePath, currentFile, {
-                cacheControl: '3600',
-                upsert: true
-            });
-        
-        if (uploadError) {
-            console.error('[PYTHON] Upload error:', uploadError);
-            throw new Error(`Failed to upload PDF: ${uploadError.message}`);
-        }
-        
-        console.log('[PYTHON] Upload successful:', filePath);
-        
-        // STEP 3: Call analyze-spec-tiled Edge Function (tile-based analysis)
-        updateLoadingStatus('Analyzing specification (tile-based scanning)...', 20);
-        console.log('[TILED] Calling analyze-spec-tiled...');
+        // STEP 1: Extract text from PDF using pdf.js (client-side!)
+        updateLoadingStatus('Extracting text from PDF...', 5);
+        console.log('[CLIENT] Starting client-side PDF extraction...');
+
+        const { text: fullText, pageCount } = await extractPdfText(currentFile, (progress) => {
+            // Update progress during extraction (5% to 40%)
+            const scaledProgress = 5 + (progress * 0.35);
+            updateLoadingStatus(`Extracting text... (${progress}%)`, scaledProgress);
+        });
+
+        console.log(`[CLIENT] Extracted ${fullText.length.toLocaleString()} chars from ${pageCount} pages`);
+
+        // STEP 2: Tile the text
+        updateLoadingStatus('Preparing tiles for analysis...', 45);
+        console.log('[CLIENT] Tiling text...');
+
+        const tiles = tileText(fullText);
+        console.log(`[CLIENT] Created ${tiles.length} tiles`);
+
+        // STEP 3: Send tiles to Edge Function for Gemini analysis
+        updateLoadingStatus(`Scanning ${tiles.length} tiles for ${selectedTrade} content...`, 50);
+        console.log('[CLIENT] Sending tiles to Edge Function...');
 
         const response = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-tiled`,
@@ -310,21 +398,23 @@ async function analyzeDocument() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    filePath: filePath,
+                    tiles: tiles,
                     trade: selectedTrade,
-                    projectName: currentFile.name
+                    projectName: currentFile.name,
+                    totalPages: pageCount,
+                    totalChars: fullText.length
                 })
             }
         );
 
         if (!response.ok) {
             const errorData = await response.json();
-            console.error('[TILED] Error response:', errorData);
+            console.error('[CLIENT] Error response:', errorData);
             throw new Error(errorData.error || 'Analysis failed');
         }
 
         const result = await response.json();
-        console.log('[TILED] Analysis complete:', result);
+        console.log('[CLIENT] Analysis complete:', result);
 
         if (!result.success) {
             throw new Error(result.error || 'Analysis failed');
@@ -352,15 +442,16 @@ async function analyzeDocument() {
                 tilesScanned: result.metadata?.tilesScanned,
                 tilesMatched: result.metadata?.tilesMatched,
                 totalPages: result.metadata?.totalPages,
+                totalChars: result.metadata?.totalChars,
                 divisionChars: result.metadata?.divisionChars
             }
         };
 
         updateLoadingStatus('Complete!', 100);
         displayResults(analysisResult);
-        
+
     } catch (error) {
-        console.error('[PYTHON] Analysis error:', error);
+        console.error('[CLIENT] Analysis error:', error);
         showError(error.message || 'Failed to analyze document. Please try again.');
     }
 }
