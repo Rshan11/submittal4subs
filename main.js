@@ -100,6 +100,63 @@ function tileText(text, tileSize = TILE_SIZE, overlap = TILE_OVERLAP) {
     return tiles;
 }
 
+/**
+ * Pre-filter tiles to only include those likely to contain the target division
+ * This reduces Gemini API calls significantly (from 38 to ~5-10 typically)
+ * @param {Array} tiles - All tiles
+ * @param {string} trade - Trade type (masonry, concrete, etc.)
+ * @returns {Array} Filtered tiles that might contain the division
+ */
+function preFilterTiles(tiles, trade) {
+    const divisionPatterns = {
+        masonry: {
+            division: '04',
+            keywords: ['DIVISION 04', 'DIVISION 4', 'DIV 04', 'DIV 4', '04 2', '042', 'MASONRY', 'UNIT MASONRY', 'BRICK', 'CMU', 'CONCRETE MASONRY', 'SECTION 04']
+        },
+        concrete: {
+            division: '03',
+            keywords: ['DIVISION 03', 'DIVISION 3', 'DIV 03', 'DIV 3', '03 ', 'CONCRETE', 'CAST-IN-PLACE', 'FORMWORK', 'SECTION 03']
+        },
+        steel: {
+            division: '05',
+            keywords: ['DIVISION 05', 'DIVISION 5', 'DIV 05', 'DIV 5', '05 ', 'STRUCTURAL STEEL', 'METAL FABRICATIONS', 'SECTION 05']
+        },
+        electrical: {
+            division: '26',
+            keywords: ['DIVISION 26', 'DIV 26', '26 ', 'ELECTRICAL', 'WIRING', 'CONDUCTORS', 'SECTION 26']
+        },
+        plumbing: {
+            division: '22',
+            keywords: ['DIVISION 22', 'DIV 22', '22 ', 'PLUMBING', 'PIPING', 'FIXTURES', 'SECTION 22']
+        },
+        mechanical: {
+            division: '23',
+            keywords: ['DIVISION 23', 'DIV 23', '23 ', 'HVAC', 'MECHANICAL', 'DUCTWORK', 'SECTION 23']
+        }
+    };
+
+    const config = divisionPatterns[trade.toLowerCase()];
+    if (!config) {
+        console.log(`[PREFILTER] Unknown trade ${trade}, sending all tiles`);
+        return tiles;
+    }
+
+    const filteredTiles = tiles.filter(tile => {
+        const upperText = tile.text.toUpperCase();
+        return config.keywords.some(keyword => upperText.includes(keyword.toUpperCase()));
+    });
+
+    console.log(`[PREFILTER] Filtered ${tiles.length} tiles → ${filteredTiles.length} tiles (${trade})`);
+
+    // If no matches, return all tiles (let Gemini decide)
+    if (filteredTiles.length === 0) {
+        console.log(`[PREFILTER] No keyword matches, sending all tiles to Gemini`);
+        return tiles;
+    }
+
+    return filteredTiles;
+}
+
 // Get URL parameters for job context
 const urlParams = new URLSearchParams(window.location.search);
 const jobId = urlParams.get('job_id');
@@ -382,8 +439,13 @@ async function analyzeDocument() {
         updateLoadingStatus('Preparing tiles for analysis...', 45);
         console.log('[CLIENT] Tiling text...');
 
-        const tiles = tileText(fullText);
-        console.log(`[CLIENT] Created ${tiles.length} tiles`);
+        const allTiles = tileText(fullText);
+        console.log(`[CLIENT] Created ${allTiles.length} tiles`);
+
+        // STEP 2.5: Pre-filter tiles to reduce API calls (keyword matching)
+        updateLoadingStatus('Pre-filtering tiles...', 48);
+        const tiles = preFilterTiles(allTiles, selectedTrade);
+        console.log(`[CLIENT] After pre-filter: ${tiles.length} tiles (reduced from ${allTiles.length})`);
 
         // STEP 3: Send tiles to Edge Function for Gemini analysis
         updateLoadingStatus(`Scanning ${tiles.length} tiles for ${selectedTrade} content...`, 50);

@@ -190,7 +190,8 @@ async function scanTilesForDivision(
   trade: string
 ): Promise<MatchedTile[]> {
 
-  const BATCH_SIZE = 5; // Process 5 tiles concurrently
+  const BATCH_SIZE = 3; // Process 3 tiles concurrently (stay under rate limits)
+  const BATCH_DELAY_MS = 8000; // Wait 8 seconds between batches (10 req/min limit)
   const matchingTiles: MatchedTile[] = [];
 
   for (let i = 0; i < tiles.length; i += BATCH_SIZE) {
@@ -208,6 +209,12 @@ async function scanTilesForDivision(
       if (result.hasContent) {
         matchingTiles.push(result.tile);
       }
+    }
+
+    // Rate limit: wait between batches (except for the last one)
+    if (i + BATCH_SIZE < tiles.length) {
+      console.log(`[SCAN] Waiting ${BATCH_DELAY_MS / 1000}s for rate limit...`);
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
     }
   }
 
