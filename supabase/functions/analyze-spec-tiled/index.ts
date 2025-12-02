@@ -20,10 +20,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ═══════════════════════════════════════════════════════════════
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,8 +61,9 @@ const DIVISION_PATTERNS: Record<string, { division: string; keywords: string[] }
   }
 };
 
-console.log("[BOOT] Tile-based Spec Analyzer v4.0 (Client-Side Extraction)");
+console.log("[BOOT] Tile-based Spec Analyzer v5.0 (Div 00-01 + OpenAI Summary)");
 console.log("[BOOT] GEMINI:", GEMINI_API_KEY ? "✓" : "✗");
+console.log("[BOOT] OPENAI:", OPENAI_API_KEY ? "✓" : "✗");
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -71,7 +74,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { tiles, trade, jobId, projectName, totalPages, totalChars, preFiltered } = body;
+    const { tiles, div01Tiles, trade, jobId, projectName, totalPages, totalChars, preFiltered } = body;
 
     // Validate required fields
     if (!tiles || !Array.isArray(tiles) || tiles.length === 0) {
@@ -131,10 +134,40 @@ serve(async (req) => {
 
     // Step 3: Final analysis with Gemini
     console.log("[STEP 3] Analyzing division content with Gemini...");
-    const analysis = await analyzeDivisionContent(divisionText, trade, tradeConfig.division, projectName);
-    console.log("[STEP 3] ✓ Analysis complete");
+    const tradeAnalysis = await analyzeDivisionContent(divisionText, trade, tradeConfig.division, projectName);
+    console.log("[STEP 3] ✓ Trade analysis complete");
 
-    // Step 4: Save results if jobId provided
+    // Step 4: Analyze Division 00-01 for contract terms (if provided)
+    let contractAnalysis = null;
+    if (div01Tiles && Array.isArray(div01Tiles) && div01Tiles.length > 0) {
+      console.log(`[STEP 4] Analyzing ${div01Tiles.length} Division 00-01 tiles for contract terms...`);
+      const div01Text = stitchTiles(div01Tiles as MatchedTile[]);
+      console.log(`[STEP 4] Stitched ${div01Text.length.toLocaleString()} chars of Div 00-01 content`);
+      contractAnalysis = await analyzeContractTerms(div01Text, projectName);
+      console.log("[STEP 4] ✓ Contract analysis complete");
+    }
+
+    // Step 5: Final summary with OpenAI (combines trade + contract)
+    let finalSummary = null;
+    if (OPENAI_API_KEY && contractAnalysis) {
+      console.log("[STEP 5] Creating final summary with OpenAI...");
+      finalSummary = await createFinalSummary(
+        tradeAnalysis.summary as string,
+        contractAnalysis.summary as string,
+        trade,
+        projectName
+      );
+      console.log("[STEP 5] ✓ Final summary complete");
+    }
+
+    // Combine all analysis results
+    const analysis = {
+      ...tradeAnalysis,
+      contractTerms: contractAnalysis,
+      finalSummary: finalSummary
+    };
+
+    // Step 6: Save results if jobId provided
     if (jobId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       console.log("[STEP 4] Saving results to database...");
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -490,6 +523,197 @@ RULES:
     trade: trade,
     division: division
   };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONTRACT TERMS ANALYSIS (Division 00-01)
+// ═══════════════════════════════════════════════════════════════
+
+async function analyzeContractTerms(
+  div01Text: string,
+  projectName?: string
+): Promise<Record<string, unknown>> {
+
+  // Limit text size
+  const maxChars = 150000;
+  const textToAnalyze = div01Text.length > maxChars
+    ? div01Text.substring(0, maxChars) + "\n\n[TRUNCATED]"
+    : div01Text;
+
+  const prompt = `You are a construction contract analyst reviewing Division 00 (Procurement) and Division 01 (General Requirements) specifications.
+
+PROJECT: ${projectName || "Construction Project"}
+
+SPECIFICATION TEXT:
+${textToAnalyze}
+
+Extract and summarize the following CONTRACT and BUSINESS terms in a CONDENSED format for contractors:
+
+## 📋 Contract Terms Summary
+
+### 💰 Payment Terms
+- Payment schedule/frequency
+- Retainage percentage
+- Payment conditions
+
+### 🏛️ Bonding & Insurance
+- Bond requirements (bid, performance, payment)
+- Insurance requirements and limits
+- Certificate requirements
+
+### 📝 Change Orders
+- Change order process
+- Pricing requirements
+- Time limits for claims
+
+### ✅ Submittals & Approvals
+- Submittal requirements
+- Review timelines
+- Approval process
+
+### 🔒 Security & Access
+- Background check requirements
+- Badge/ID requirements
+- Site access restrictions
+- Working hours
+
+### ⚠️ Liquidated Damages
+- Daily rate if specified
+- Milestone penalties
+
+### 📅 Schedule Requirements
+- Substantial completion requirements
+- Milestone dates
+- Float ownership
+
+### 🛡️ Warranty
+- Warranty periods
+- Special warranty requirements
+
+### 🚨 Key Risk Items
+- Unusual or onerous terms
+- Items requiring special attention
+- Cost impact warnings
+
+RULES:
+1. Be CONCISE - use bullet points
+2. BOLD key numbers, dates, and percentages
+3. Skip sections if not found in spec
+4. Flag anything unusual or risky with ⚠️
+5. Include specific dollar amounts, percentages, and timeframes`;
+
+  const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 8000
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error("[CONTRACT] Gemini error:", errText);
+    return { summary: "Contract analysis failed", error: errText };
+  }
+
+  const data = await response.json();
+  const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  return {
+    summary: resultText || "No contract terms found",
+    format: "markdown"
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OPENAI FINAL SUMMARY
+// ═══════════════════════════════════════════════════════════════
+
+async function createFinalSummary(
+  tradeSummary: string,
+  contractSummary: string,
+  trade: string,
+  projectName?: string
+): Promise<string> {
+
+  const prompt = `You are creating an EXECUTIVE SUMMARY for a ${trade} contractor bidding on ${projectName || "a construction project"}.
+
+Combine and synthesize these two analysis sections into ONE cohesive bid summary:
+
+=== TRADE REQUIREMENTS (Division ${trade}) ===
+${tradeSummary}
+
+=== CONTRACT TERMS (Division 00-01) ===
+${contractSummary}
+
+Create a final EXECUTIVE BID SUMMARY with these sections:
+
+## 🎯 Executive Bid Summary
+
+### Critical Bid Items
+- Top 5-7 items that MUST be included in the bid
+- Key materials with specific specs
+- Major scope items
+
+### ⚠️ Risk & Cost Alerts
+- Items that could impact pricing
+- Unusual requirements
+- Potential exclusions to consider
+
+### 📋 Pre-Bid Checklist
+- [ ] Key submittals required
+- [ ] Bonds/insurance needed
+- [ ] Background checks required
+- [ ] Special certifications needed
+
+### 💡 Bid Strategy Notes
+- Suggested clarifications
+- Items to verify
+- Coordination concerns
+
+Keep it CONCISE and ACTIONABLE. This is a quick-reference for bid day.`;
+
+  try {
+    const response = await fetch(OPENAI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a construction bidding expert creating concise, actionable bid summaries for contractors."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 2000
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("[OPENAI] Error:", errText);
+      return "Executive summary generation failed";
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || "No summary generated";
+
+  } catch (err) {
+    console.error("[OPENAI] Exception:", err);
+    return "Executive summary generation failed";
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

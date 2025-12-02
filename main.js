@@ -162,6 +162,44 @@ function preFilterTiles(tiles, trade) {
     return filteredTiles;
 }
 
+/**
+ * Pre-filter tiles for Division 00-01 (Contract/General Requirements)
+ * @param {Array} tiles - All tiles
+ * @returns {Array} Filtered tiles containing Division 00-01 content
+ */
+function preFilterDiv01Tiles(tiles) {
+    const div01Keywords = [
+        'DIVISION 00', 'DIVISION 01', 'DIVISION 0', 'DIVISION 1',
+        'DIV 00', 'DIV 01', 'DIV 0', 'DIV 1',
+        'GENERAL REQUIREMENTS', 'GENERAL CONDITIONS', 'PROCUREMENT',
+        'BIDDING', 'CONTRACTING', 'CONTRACT FORMS',
+        'INSURANCE', 'BONDS', 'BONDING', 'PAYMENT', 'RETAINAGE',
+        'CHANGE ORDER', 'MODIFICATIONS', 'SUBMITTALS', 'SUBMITTAL',
+        'QUALITY CONTROL', 'QUALITY ASSURANCE', 'TESTING',
+        'TEMPORARY FACILITIES', 'EXECUTION', 'CLOSEOUT',
+        'WARRANTY', 'WARRANTIES', 'GUARANTEE',
+        'ALTERNATES', 'ALLOWANCES', 'UNIT PRICES',
+        'SECTION 00', 'SECTION 01', '00 ', '01 ',
+        'BACKGROUND CHECK', 'SECURITY', 'SAFETY',
+        'LIQUIDATED DAMAGES', 'SUBSTANTIAL COMPLETION'
+    ];
+
+    const filteredTiles = tiles.filter(tile => {
+        const upperText = tile.text.toUpperCase();
+        return div01Keywords.some(keyword => upperText.includes(keyword));
+    });
+
+    console.log(`[PREFILTER] Division 00-01: ${tiles.length} tiles → ${filteredTiles.length} tiles`);
+
+    // Also include first 3 tiles (often contain TOC and front matter)
+    const firstTiles = tiles.slice(0, 3);
+    const combined = [...new Map([...firstTiles, ...filteredTiles].map(t => [t.index, t])).values()];
+    combined.sort((a, b) => a.index - b.index);
+
+    console.log(`[PREFILTER] Division 00-01 + front matter: ${combined.length} tiles`);
+    return combined;
+}
+
 // Get URL parameters for job context
 const urlParams = new URLSearchParams(window.location.search);
 const jobId = urlParams.get('job_id');
@@ -449,11 +487,15 @@ async function analyzeDocument() {
 
         // STEP 2.5: Pre-filter tiles to reduce API calls (keyword matching)
         updateLoadingStatus('Pre-filtering tiles...', 48);
-        const tiles = preFilterTiles(allTiles, selectedTrade);
-        console.log(`[CLIENT] After pre-filter: ${tiles.length} tiles (reduced from ${allTiles.length})`);
+        const tradeTiles = preFilterTiles(allTiles, selectedTrade);
+        console.log(`[CLIENT] Trade tiles: ${tradeTiles.length} tiles (reduced from ${allTiles.length})`);
+
+        // STEP 2.6: Also filter for Division 00-01 (contract terms, general requirements)
+        const div01Tiles = preFilterDiv01Tiles(allTiles);
+        console.log(`[CLIENT] Div 00-01 tiles: ${div01Tiles.length} tiles`);
 
         // STEP 3: Send tiles to Edge Function for Gemini analysis
-        updateLoadingStatus(`Scanning ${tiles.length} tiles for ${selectedTrade} content...`, 50);
+        updateLoadingStatus(`Analyzing ${tradeTiles.length} trade + ${div01Tiles.length} contract tiles...`, 50);
         console.log('[CLIENT] Sending tiles to Edge Function...');
 
         // Send with preFiltered=true since client already filtered tiles by keywords
@@ -467,7 +509,8 @@ async function analyzeDocument() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    tiles: tiles,
+                    tiles: tradeTiles,
+                    div01Tiles: div01Tiles,  // Division 00-01 tiles for contract terms
                     trade: selectedTrade,
                     projectName: currentFile.name,
                     totalPages: pageCount,

@@ -6,15 +6,6 @@
     <title>Spec Analyzer</title>
 </head>
 <body>
-    <script type="module">
-        import { supabase } from './lib/supabase.js'
-        
-        async function redirect() {
-            const { data: { user } } = await supabase.auth.getUser()
-            window.location.href = user ? '/dashboard.html' : '/login.html'
-        }
-        
-        redirect()
-    </script>
+    <script type="module" src="/redirect.js"></script>
 </body>
 </html>
