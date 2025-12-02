@@ -71,7 +71,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { tiles, trade, jobId, projectName, totalPages, totalChars } = body;
+    const { tiles, trade, jobId, projectName, totalPages, totalChars, preFiltered } = body;
 
     // Validate required fields
     if (!tiles || !Array.isArray(tiles) || tiles.length === 0) {
@@ -95,12 +95,23 @@ serve(async (req) => {
     console.log(`PROJECT: ${projectName || "Unnamed"}`);
     console.log(`TRADE: ${trade} (Division ${tradeConfig.division})`);
     console.log(`TILES: ${tiles.length} (${totalChars?.toLocaleString() || "?"} chars from ${totalPages || "?"} pages)`);
+    console.log(`MODE: ${preFiltered ? "FAST (pre-filtered, skip scanning)" : "FULL (Gemini scanning)"}`);
     console.log(`${"═".repeat(50)}\n`);
 
-    // Step 1: Scan tiles for target division (parallel, batched)
-    console.log(`[STEP 1] Scanning ${tiles.length} tiles for Division ${tradeConfig.division}...`);
-    const matchingTiles = await scanTilesForDivision(tiles, tradeConfig, trade);
-    console.log(`[STEP 1] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`);
+    let matchingTiles: MatchedTile[];
+
+    // FAST MODE: Skip Gemini scanning if tiles are already pre-filtered by client
+    // This reduces processing from ~3 minutes to ~20 seconds for large documents
+    if (preFiltered) {
+      console.log(`[STEP 1] FAST MODE: Using all ${tiles.length} pre-filtered tiles (skipping Gemini scan)`);
+      matchingTiles = tiles.map(t => ({ ...t } as MatchedTile));
+      console.log(`[STEP 1] ✓ Using ${matchingTiles.length} tiles`);
+    } else {
+      // FULL MODE: Scan tiles for target division (parallel, batched)
+      console.log(`[STEP 1] Scanning ${tiles.length} tiles for Division ${tradeConfig.division}...`);
+      matchingTiles = await scanTilesForDivision(tiles, tradeConfig, trade);
+      console.log(`[STEP 1] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`);
+    }
 
     if (matchingTiles.length === 0) {
       return jsonResp({
@@ -417,6 +428,24 @@ ${tradeEmoji} ${tradeName} Division Summary (Condensed Contractor Format)
 - Repoint all defective work
 - Protect adjacent materials from overspray
 
+## 3. Related Divisions & Coordination
+
+### Referenced Sections (items spec'd elsewhere)
+| Item | See Section | Who Provides | Who Installs |
+|------|-------------|--------------|--------------|
+| Through-wall flashing | 07 62 00 | Div 7 | Masonry |
+| Joint sealants | 07 92 00 | Div 7 | Div 7 |
+| Cavity insulation | 07 21 00 | Div 7 | Masonry |
+| Steel lintels | 05 50 00 | Div 5 | Masonry |
+
+### ⚠️ Scope Clarifications
+- **BY MASONRY**: List items explicitly assigned to this trade
+- **BY OTHERS**: List items to be provided/installed by other trades
+- **COORDINATE WITH**: List items requiring coordination (embedded items, openings, etc.)
+
+### 💰 Cost Impact Items
+- Items that may affect your bid (special shapes, premium materials, sequencing requirements)
+
 ---
 
 RULES:
@@ -426,7 +455,9 @@ RULES:
 4. Include ALL ASTM/standard references found
 5. Note any special restrictions (no X allowed, requires approval, etc.)
 6. Skip sections if not found in the spec (don't make up content)
-7. Use em-dashes (—) to separate item names from specs`;
+7. Use em-dashes (—) to separate item names from specs
+8. CRITICAL: Extract ALL cross-references to other divisions (Section XX XX XX, Division X, etc.)
+9. Note WHO provides vs WHO installs for each referenced item`;
 
   const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",

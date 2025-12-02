@@ -6,6 +6,11 @@ import { supabase } from './lib/supabase.js';
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
+// Suppress font warnings (TT: undefined function errors are harmless)
+if (pdfjsLib.VerbosityLevel) {
+    pdfjsLib.GlobalWorkerOptions.verbosity = pdfjsLib.VerbosityLevel.ERRORS;
+}
+
 // ============================================================================
 // CLIENT-SIDE PDF EXTRACTION (no server needed!)
 // ============================================================================
@@ -451,6 +456,8 @@ async function analyzeDocument() {
         updateLoadingStatus(`Scanning ${tiles.length} tiles for ${selectedTrade} content...`, 50);
         console.log('[CLIENT] Sending tiles to Edge Function...');
 
+        // Send with preFiltered=true since client already filtered tiles by keywords
+        // This enables FAST MODE on the server, skipping expensive Gemini scanning
         const response = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-tiled`,
             {
@@ -464,7 +471,8 @@ async function analyzeDocument() {
                     trade: selectedTrade,
                     projectName: currentFile.name,
                     totalPages: pageCount,
-                    totalChars: fullText.length
+                    totalChars: fullText.length,
+                    preFiltered: true  // Skip Gemini tile scanning - client already filtered
                 })
             }
         );
