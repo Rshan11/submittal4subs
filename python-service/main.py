@@ -17,8 +17,23 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (check both python-service/.env and parent .env)
+load_dotenv()  # python-service/.env
+load_dotenv(dotenv_path="../.env")  # parent .env
+
+# Also check for VITE_ prefixed vars (from frontend .env)
+def get_env(key: str) -> str:
+    return os.getenv(key) or os.getenv(f"VITE_{key}") or ""
+
+# Set normalized env vars
+if not os.getenv("SUPABASE_URL"):
+    os.environ["SUPABASE_URL"] = get_env("SUPABASE_URL")
+if not os.getenv("SUPABASE_SERVICE_KEY"):
+    os.environ["SUPABASE_SERVICE_KEY"] = get_env("SUPABASE_SERVICE_KEY") or get_env("SUPABASE_ANON_KEY")
+if not os.getenv("GEMINI_API_KEY"):
+    os.environ["GEMINI_API_KEY"] = get_env("GEMINI_API_KEY")
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = get_env("OPENAI_API_KEY")
 
 # Import our modules
 from storage import upload_pdf, download_pdf
@@ -51,11 +66,11 @@ app.add_middleware(
 )
 
 print("[BOOT] Spec Analyzer Service v2.0")
-print(f"[BOOT] SUPABASE_URL: {'✓' if os.getenv('SUPABASE_URL') else '✗'}")
-print(f"[BOOT] SUPABASE_SERVICE_KEY: {'✓' if os.getenv('SUPABASE_SERVICE_KEY') else '✗'}")
-print(f"[BOOT] R2_ACCOUNT_ID: {'✓' if os.getenv('R2_ACCOUNT_ID') else '✗'}")
-print(f"[BOOT] GEMINI_API_KEY: {'✓' if os.getenv('GEMINI_API_KEY') else '✗'}")
-print(f"[BOOT] OPENAI_API_KEY: {'✓' if os.getenv('OPENAI_API_KEY') else '✗'}")
+print(f"[BOOT] SUPABASE_URL: {'OK' if os.getenv('SUPABASE_URL') else 'MISSING'}")
+print(f"[BOOT] SUPABASE_SERVICE_KEY: {'OK' if os.getenv('SUPABASE_SERVICE_KEY') else 'MISSING'}")
+print(f"[BOOT] R2_ACCOUNT_ID: {'OK' if os.getenv('R2_ACCOUNT_ID') else 'MISSING'}")
+print(f"[BOOT] GEMINI_API_KEY: {'OK' if os.getenv('GEMINI_API_KEY') else 'MISSING'}")
+print(f"[BOOT] OPENAI_API_KEY: {'OK' if os.getenv('OPENAI_API_KEY') else 'MISSING'}")
 
 
 # ═══════════════════════════════════════════════════════════════

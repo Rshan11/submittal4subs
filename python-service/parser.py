@@ -39,6 +39,21 @@ CROSS_REF_PATTERN = r'\b(\d{2})\s+(\d{2})\s+(\d{2})\b'
 # PDF TEXT EXTRACTION
 # ═══════════════════════════════════════════════════════════════
 
+def clean_text(text: str) -> str:
+    """Remove problematic Unicode characters that cause encoding issues"""
+    # Remove zero-width characters and other problematic Unicode
+    problematic = [
+        '\u200b',  # zero-width space
+        '\u200c',  # zero-width non-joiner
+        '\u200d',  # zero-width joiner
+        '\ufeff',  # BOM
+        '\u00ad',  # soft hyphen
+    ]
+    for char in problematic:
+        text = text.replace(char, '')
+    return text
+
+
 def extract_text_from_pdf(pdf_bytes: bytes) -> Tuple[str, int]:
     """
     Extract all text from PDF with page markers
@@ -51,6 +66,7 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> Tuple[str, int]:
         page_count = len(pdf.pages)
         for i, page in enumerate(pdf.pages, 1):
             text = page.extract_text() or ""
+            text = clean_text(text)
             full_text += f"\n--- Page {i} ---\n{text}"
 
     return full_text, page_count
@@ -63,7 +79,7 @@ def extract_pages(pdf_bytes: bytes, start_page: int, end_page: int) -> str:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for i in range(start_page - 1, min(end_page, len(pdf.pages))):
             page = pdf.pages[i]
-            page_text = page.extract_text() or ""
+            page_text = clean_text(page.extract_text() or "")
             text += f"\n--- Page {i + 1} ---\n{page_text}"
 
     return text
@@ -85,7 +101,12 @@ def scan_divisions(pdf_bytes: bytes) -> List[Dict[str, Any]]:
         page_count = len(pdf.pages)
 
         for page_num, page in enumerate(pdf.pages, 1):
-            text = page.extract_text() or ""
+            text = clean_text(page.extract_text() or "")
+
+            # Debug: print first 200 chars of pages around 100
+            if 98 <= page_num <= 105:
+                preview = text[:300].replace('\n', ' | ')
+                print(f"[DEBUG] Page {page_num}: {preview}")
 
             # Check for division headers
             division_info = detect_division_header(text, page_num)
@@ -110,38 +131,47 @@ def scan_divisions(pdf_bytes: bytes) -> List[Dict[str, Any]]:
 def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]:
     """
     Detect if a page contains a division/section header.
-    Uses header/footer area scanning + keyword validation.
+    Handles many format variations found in real specs.
     """
-    # Focus on top portion of page (headers typically in first 20%)
-    lines = text.split('\n')
-    header_area = '\n'.join(lines[:min(15, len(lines))])
+    text_upper = text.upper()
 
-    # Pattern 1: DIVISION XX - TITLE
-    match = re.search(r'DIVISION\s+(\d{1,2})\s*[-–—:]?\s*([A-Z][A-Z\s&/]+)', header_area, re.IGNORECASE)
-    if match:
-        div_code = match.group(1).zfill(2)
-        title = match.group(2).strip()
-        if validate_division_context(text):
-            return {
-                "division_code": div_code,
-                "section_number": None,
-                "section_title": title,
-                "start_page": page_num
-            }
+    # Only process if this looks like a section start page
+    if not validate_division_context(text):
+        return None
 
-    # Pattern 2: SECTION XX XX XX or XX XX XX TITLE
-    match = re.search(r'(?:SECTION\s+)?(\d{2})\s+(\d{2})\s+(\d{2})(?:\s+[-–—]\s*)?([A-Z][A-Z\s]+)?', header_area, re.IGNORECASE)
-    if match:
-        div_code = match.group(1)
-        section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-        title = match.group(4).strip() if match.group(4) else None
-        if validate_division_context(text):
+    # PATTERN GROUP 1: SECTION with 6-digit code (most reliable)
+    # Handles: SECTION042900, SECTION 04 29 00, SECTION04 29 00, etc.
+    patterns = [
+        # SECTION followed by 6 digits (with or without spaces)
+        r'SECTION\s*(\d{2})\s*(\d{2})\s*(\d{2})',
+        # Just 6 digits at start of line
+        r'^(\d{2})\s*(\d{2})\s*(\d{2})\b',
+        # 6 digits followed by dash and title
+        r'(\d{2})\s*(\d{2})\s*(\d{2})\s*[-–—]',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match:
+            div_code = match.group(1)
+            section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
             return {
                 "division_code": div_code,
                 "section_number": section_number,
-                "section_title": title,
+                "section_title": None,
                 "start_page": page_num
             }
+
+    # PATTERN GROUP 2: DIVISION XX format
+    match = re.search(r'DIVISION\s*(\d{1,2})', text, re.IGNORECASE)
+    if match:
+        div_code = match.group(1).zfill(2)
+        return {
+            "division_code": div_code,
+            "section_number": None,
+            "section_title": None,
+            "start_page": page_num
+        }
 
     return None
 
@@ -153,7 +183,8 @@ def validate_division_context(text: str) -> bool:
     """
     text_upper = text.upper()
     keyword_count = sum(1 for kw in VALIDATION_KEYWORDS if kw in text_upper)
-    return keyword_count >= 2
+    # More lenient - just need 1 keyword, or if it has significant text length
+    return keyword_count >= 1 or len(text) > 500
 
 
 def merge_division_sections(divisions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

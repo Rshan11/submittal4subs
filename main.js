@@ -1,204 +1,13 @@
-// Main application logic for Spec Analyzer - CLEAN VERSION
-import * as pdfjsLib from 'pdfjs-dist';
+// Main application logic for Spec Analyzer - Python API Version
 import { generateAndDownloadPDF } from './pdf-generator.js';
 import { supabase } from './lib/supabase.js';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-
-// Suppress font warnings (TT: undefined function errors are harmless)
-if (pdfjsLib.VerbosityLevel) {
-    pdfjsLib.GlobalWorkerOptions.verbosity = pdfjsLib.VerbosityLevel.ERRORS;
-}
+import { uploadSpec, parseSpec, analyzeSpec, getDivisionForTrade } from './lib/api.js';
 
 // ============================================================================
-// CLIENT-SIDE PDF EXTRACTION (no server needed!)
+// PYTHON API INTEGRATION
 // ============================================================================
-const TILE_SIZE = 50000;    // 50K characters per tile
-const TILE_OVERLAP = 5000;  // 5K overlap to avoid cutting sections
-
-/**
- * Extract all text from PDF using pdf.js (runs in browser)
- * @param {File} file - The PDF file
- * @param {Function} onProgress - Progress callback (0-100)
- * @returns {Promise<{text: string, pageCount: number}>}
- */
-async function extractPdfText(file, onProgress = () => {}) {
-    console.log('[PDF.js] Starting client-side extraction...');
-
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const pageCount = pdf.numPages;
-
-    console.log(`[PDF.js] Processing ${pageCount} pages...`);
-
-    const textParts = [];
-
-    for (let i = 1; i <= pageCount; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-
-        // Extract text items and join them
-        const pageText = textContent.items
-            .map(item => item.str)
-            .join(' ');
-
-        textParts.push(`\n--- PAGE ${i} ---\n${pageText}`);
-
-        // Report progress
-        const progress = Math.round((i / pageCount) * 100);
-        onProgress(progress);
-
-        if (i % 50 === 0) {
-            console.log(`[PDF.js] Processed ${i}/${pageCount} pages`);
-        }
-    }
-
-    let fullText = textParts.join('\n');
-
-    // Normalize whitespace
-    fullText = fullText.replace(/[ \t]+/g, ' ');
-    fullText = fullText.replace(/\n{4,}/g, '\n\n\n');
-
-    console.log(`[PDF.js] Complete: ${fullText.length.toLocaleString()} chars from ${pageCount} pages`);
-
-    return { text: fullText, pageCount };
-}
-
-/**
- * Tile text into overlapping chunks for Gemini processing
- * @param {string} text - Full extracted text
- * @param {number} tileSize - Characters per tile
- * @param {number} overlap - Overlap between tiles
- * @returns {Array<{index: number, start: number, end: number, text: string}>}
- */
-function tileText(text, tileSize = TILE_SIZE, overlap = TILE_OVERLAP) {
-    const tiles = [];
-    const textLen = text.length;
-
-    if (textLen === 0) return tiles;
-
-    const step = tileSize - overlap;
-    let start = 0;
-    let index = 0;
-
-    while (start < textLen) {
-        const end = Math.min(start + tileSize, textLen);
-        const tileText = text.substring(start, end);
-
-        tiles.push({
-            index,
-            start,
-            end,
-            char_count: tileText.length,
-            text: tileText
-        });
-
-        index++;
-        start += step;
-
-        // Don't create tiny trailing tiles
-        if (textLen - start < overlap) break;
-    }
-
-    console.log(`[TILE] Created ${tiles.length} tiles from ${textLen.toLocaleString()} chars`);
-    return tiles;
-}
-
-/**
- * Pre-filter tiles to only include those likely to contain the target division
- * This reduces Gemini API calls significantly (from 38 to ~5-10 typically)
- * @param {Array} tiles - All tiles
- * @param {string} trade - Trade type (masonry, concrete, etc.)
- * @returns {Array} Filtered tiles that might contain the division
- */
-function preFilterTiles(tiles, trade) {
-    const divisionPatterns = {
-        masonry: {
-            division: '04',
-            keywords: ['DIVISION 04', 'DIVISION 4', 'DIV 04', 'DIV 4', '04 2', '042', 'MASONRY', 'UNIT MASONRY', 'BRICK', 'CMU', 'CONCRETE MASONRY', 'SECTION 04']
-        },
-        concrete: {
-            division: '03',
-            keywords: ['DIVISION 03', 'DIVISION 3', 'DIV 03', 'DIV 3', '03 ', 'CONCRETE', 'CAST-IN-PLACE', 'FORMWORK', 'SECTION 03']
-        },
-        steel: {
-            division: '05',
-            keywords: ['DIVISION 05', 'DIVISION 5', 'DIV 05', 'DIV 5', '05 ', 'STRUCTURAL STEEL', 'METAL FABRICATIONS', 'SECTION 05']
-        },
-        electrical: {
-            division: '26',
-            keywords: ['DIVISION 26', 'DIV 26', '26 ', 'ELECTRICAL', 'WIRING', 'CONDUCTORS', 'SECTION 26']
-        },
-        plumbing: {
-            division: '22',
-            keywords: ['DIVISION 22', 'DIV 22', '22 ', 'PLUMBING', 'PIPING', 'FIXTURES', 'SECTION 22']
-        },
-        mechanical: {
-            division: '23',
-            keywords: ['DIVISION 23', 'DIV 23', '23 ', 'HVAC', 'MECHANICAL', 'DUCTWORK', 'SECTION 23']
-        }
-    };
-
-    const config = divisionPatterns[trade.toLowerCase()];
-    if (!config) {
-        console.log(`[PREFILTER] Unknown trade ${trade}, sending all tiles`);
-        return tiles;
-    }
-
-    const filteredTiles = tiles.filter(tile => {
-        const upperText = tile.text.toUpperCase();
-        return config.keywords.some(keyword => upperText.includes(keyword.toUpperCase()));
-    });
-
-    console.log(`[PREFILTER] Filtered ${tiles.length} tiles → ${filteredTiles.length} tiles (${trade})`);
-
-    // If no matches, return all tiles (let Gemini decide)
-    if (filteredTiles.length === 0) {
-        console.log(`[PREFILTER] No keyword matches, sending all tiles to Gemini`);
-        return tiles;
-    }
-
-    return filteredTiles;
-}
-
-/**
- * Pre-filter tiles for Division 00-01 (Contract/General Requirements)
- * @param {Array} tiles - All tiles
- * @returns {Array} Filtered tiles containing Division 00-01 content
- */
-function preFilterDiv01Tiles(tiles) {
-    const div01Keywords = [
-        'DIVISION 00', 'DIVISION 01', 'DIVISION 0', 'DIVISION 1',
-        'DIV 00', 'DIV 01', 'DIV 0', 'DIV 1',
-        'GENERAL REQUIREMENTS', 'GENERAL CONDITIONS', 'PROCUREMENT',
-        'BIDDING', 'CONTRACTING', 'CONTRACT FORMS',
-        'INSURANCE', 'BONDS', 'BONDING', 'PAYMENT', 'RETAINAGE',
-        'CHANGE ORDER', 'MODIFICATIONS', 'SUBMITTALS', 'SUBMITTAL',
-        'QUALITY CONTROL', 'QUALITY ASSURANCE', 'TESTING',
-        'TEMPORARY FACILITIES', 'EXECUTION', 'CLOSEOUT',
-        'WARRANTY', 'WARRANTIES', 'GUARANTEE',
-        'ALTERNATES', 'ALLOWANCES', 'UNIT PRICES',
-        'SECTION 00', 'SECTION 01', '00 ', '01 ',
-        'BACKGROUND CHECK', 'SECURITY', 'SAFETY',
-        'LIQUIDATED DAMAGES', 'SUBSTANTIAL COMPLETION'
-    ];
-
-    const filteredTiles = tiles.filter(tile => {
-        const upperText = tile.text.toUpperCase();
-        return div01Keywords.some(keyword => upperText.includes(keyword));
-    });
-
-    console.log(`[PREFILTER] Division 00-01: ${tiles.length} tiles → ${filteredTiles.length} tiles`);
-
-    // Also include first 3 tiles (often contain TOC and front matter)
-    const firstTiles = tiles.slice(0, 3);
-    const combined = [...new Map([...firstTiles, ...filteredTiles].map(t => [t.index, t])).values()];
-    combined.sort((a, b) => a.index - b.index);
-
-    console.log(`[PREFILTER] Division 00-01 + front matter: ${combined.length} tiles`);
-    return combined;
-}
+// PDF extraction now happens server-side via the Python service
+// Frontend just uploads the file and receives analysis results
 
 // Get URL parameters for job context
 const urlParams = new URLSearchParams(window.location.search);
@@ -443,7 +252,7 @@ async function calculateFileHash(file) {
 }
 
 // ============================================================================
-// MAIN ANALYSIS FUNCTION - Client-Side Extraction (no Python server needed!)
+// MAIN ANALYSIS FUNCTION - Python API Version
 // ============================================================================
 async function analyzeDocument() {
     if (!currentFile) {
@@ -456,138 +265,140 @@ async function analyzeDocument() {
         return;
     }
 
-    const userEmail = userEmailInput.value.trim();
-    if (!userEmail || !userEmail.includes('@')) {
-        showError('Please enter a valid email address');
-        return;
-    }
-
     showSection('loading');
     analysisStartTime = Date.now();
 
     try {
-        // STEP 1: Extract text from PDF using pdf.js (client-side!)
-        updateLoadingStatus('Extracting text from PDF...', 5);
-        console.log('[CLIENT] Starting client-side PDF extraction...');
+        // Get user ID for the upload
+        const userId = currentUser?.id;
+        if (!userId) {
+            showError('Please log in to analyze documents');
+            return;
+        }
 
-        const { text: fullText, pageCount } = await extractPdfText(currentFile, (progress) => {
-            // Update progress during extraction (5% to 40%)
-            const scaledProgress = 5 + (progress * 0.35);
-            updateLoadingStatus(`Extracting text... (${progress}%)`, scaledProgress);
-        });
+        // Get or create job
+        let currentJobId = jobId;
+        if (!currentJobId) {
+            // Create a new job based on the filename
+            const jobName = currentFile.name.replace('.pdf', '').substring(0, 100);
+            updateLoadingStatus('Creating job...', 5);
 
-        console.log(`[CLIENT] Extracted ${fullText.length.toLocaleString()} chars from ${pageCount} pages`);
-
-        // STEP 2: Tile the text
-        updateLoadingStatus('Preparing tiles for analysis...', 45);
-        console.log('[CLIENT] Tiling text...');
-
-        const allTiles = tileText(fullText);
-        console.log(`[CLIENT] Created ${allTiles.length} tiles`);
-
-        // STEP 2.5: Pre-filter tiles to reduce API calls (keyword matching)
-        updateLoadingStatus('Pre-filtering tiles...', 48);
-        const tradeTiles = preFilterTiles(allTiles, selectedTrade);
-        console.log(`[CLIENT] Trade tiles: ${tradeTiles.length} tiles (reduced from ${allTiles.length})`);
-
-        // STEP 2.6: Also filter for Division 00-01 (contract terms, general requirements)
-        const div01Tiles = preFilterDiv01Tiles(allTiles);
-        console.log(`[CLIENT] Div 00-01 tiles: ${div01Tiles.length} tiles`);
-
-        // STEP 3: Send tiles to Edge Function for Gemini analysis
-        updateLoadingStatus(`Analyzing ${tradeTiles.length} trade + ${div01Tiles.length} contract tiles...`, 50);
-        console.log('[CLIENT] Sending tiles to Edge Function...');
-
-        // Send with preFiltered=true since client already filtered tiles by keywords
-        // This enables FAST MODE on the server, skipping expensive Gemini scanning
-        const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-spec-tiled`,
-            {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    tiles: tradeTiles,
-                    div01Tiles: div01Tiles,  // Division 00-01 tiles for contract terms
-                    trade: selectedTrade,
-                    projectName: currentFile.name,
-                    totalPages: pageCount,
-                    totalChars: fullText.length,
-                    preFiltered: true  // Skip Gemini tile scanning - client already filtered
+            const { data: newJob, error: jobError } = await supabase
+                .from('jobs')
+                .insert({
+                    user_id: userId,
+                    job_name: jobName,
+                    status: 'active'
                 })
+                .select()
+                .single();
+
+            if (jobError) {
+                throw new Error(`Failed to create job: ${jobError.message}`);
             }
+            currentJobId = newJob.id;
+            console.log('[API] Created new job:', currentJobId);
+        }
+
+        // STEP 1: Upload PDF to Python service
+        updateLoadingStatus('Uploading specification...', 10);
+        console.log('[API] Uploading PDF to Python service...');
+
+        const uploadResult = await uploadSpec(currentFile, userId, currentJobId);
+        console.log('[API] Upload complete:', uploadResult);
+
+        const specId = uploadResult.spec_id;
+
+        // STEP 2: Parse PDF into divisions and tiles
+        updateLoadingStatus('Scanning for divisions...', 30);
+        console.log('[API] Parsing PDF...');
+
+        const parseResult = await parseSpec(specId);
+        console.log('[API] Parse complete:', parseResult);
+        console.log(`[API] Found ${parseResult.division_count} divisions, ${parseResult.tile_count} tiles`);
+
+        // Show divisions found
+        const divisionList = parseResult.divisions.map(d => `${d.code} (${d.title || 'Untitled'})`).join(', ');
+        updateLoadingStatus(`Found divisions: ${divisionList}`, 50);
+
+        // STEP 3: Run AI analysis on selected trade's division
+        let targetDivision = getDivisionForTrade(selectedTrade);
+
+        // Check if the target division exists in the spec
+        const availableDivisions = parseResult.divisions.map(d => d.code);
+        if (!availableDivisions.includes(targetDivision)) {
+            // Division not found - pick the first available or show error
+            if (availableDivisions.length === 0) {
+                throw new Error('No divisions found in this specification.');
+            }
+
+            // Use the first available division as fallback
+            const fallbackDivision = availableDivisions[0];
+            const fallbackTitle = parseResult.divisions.find(d => d.code === fallbackDivision)?.title || '';
+            console.log(`[API] Division ${targetDivision} not found. Using Division ${fallbackDivision} (${fallbackTitle})`);
+
+            updateLoadingStatus(`Division ${targetDivision} not in spec. Analyzing Division ${fallbackDivision} instead...`, 55);
+            targetDivision = fallbackDivision;
+        }
+
+        updateLoadingStatus(`Analyzing Division ${targetDivision} (${selectedTrade})...`, 60);
+        console.log(`[API] Analyzing Division ${targetDivision}...`);
+
+        const analysisResponse = await analyzeSpec(
+            specId,
+            targetDivision,
+            true,  // include contract terms
+            currentFile.name.replace('.pdf', '')
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error('[CLIENT] Error response:', errorData);
-            throw new Error(errorData.error || 'Analysis failed');
-        }
-
-        const result = await response.json();
-        console.log('[CLIENT] Analysis complete:', result);
-
-        if (!result.success) {
-            throw new Error(result.error || 'Analysis failed');
-        }
+        console.log('[API] Analysis complete:', analysisResponse);
 
         // STEP 4: Format and display results
         updateLoadingStatus('Formatting results...', 95);
 
-        const analysis = result.analysis;
+        const analysis = analysisResponse.analysis;
 
-        // Check if this is the new condensed markdown format
-        if (analysis.format === 'markdown' && analysis.summary) {
-            // New format: pass markdown directly
-            analysisResult = {
-                format: 'markdown',
-                summary: analysis.summary,
-                trade: analysis.trade,
-                division: analysis.division,
-                metadata: {
-                    trade: selectedTrade,
-                    division: result.division,
-                    project: result.project,
-                    processingTimeMs: result.metadata?.processingTimeMs,
-                    tilesScanned: result.metadata?.tilesScanned,
-                    tilesMatched: result.metadata?.tilesMatched,
-                    totalPages: result.metadata?.totalPages,
-                    totalChars: result.metadata?.totalChars,
-                    divisionChars: result.metadata?.divisionChars
-                }
-            };
-        } else {
-            // Legacy format: transform the data
-            analysisResult = {
-                contract: formatTiledBusinessTerms(analysis.summary),
-                tradeRequirements: formatTiledMaterials(analysis.materials, analysis.execution),
-                coordination: analysis.coordination || [],
-                submittals: analysis.submittals || [],
-                exclusions: analysis.exclusions || [],
-                alternates: analysis.alternates || [],
-                qualityAssurance: analysis.quality_assurance || [],
-                summary: analysis.summary || {},
-                metadata: {
-                    trade: selectedTrade,
-                    division: result.division,
-                    project: result.project,
-                    processingTimeMs: result.metadata?.processingTimeMs,
-                    tilesScanned: result.metadata?.tilesScanned,
-                    tilesMatched: result.metadata?.tilesMatched,
-                    totalPages: result.metadata?.totalPages,
-                    totalChars: result.metadata?.totalChars,
-                    divisionChars: result.metadata?.divisionChars
-                }
-            };
+        // Format results for display
+        // The Python API returns: trade_analysis, contract_analysis, executive_summary
+        const tradeSummary = analysis.trade_analysis?.summary || '';
+        const contractSummary = analysis.contract_analysis?.summary || '';
+        const executiveSummary = analysis.executive_summary || '';
+
+        // Combine into display format
+        let combinedMarkdown = '';
+
+        if (executiveSummary) {
+            combinedMarkdown += executiveSummary + '\n\n---\n\n';
         }
+
+        if (tradeSummary) {
+            combinedMarkdown += tradeSummary + '\n\n---\n\n';
+        }
+
+        if (contractSummary) {
+            combinedMarkdown += contractSummary;
+        }
+
+        analysisResult = {
+            format: 'markdown',
+            summary: combinedMarkdown || 'Analysis complete. No specific content found for this division.',
+            trade: selectedTrade,
+            division: targetDivision,
+            metadata: {
+                trade: selectedTrade,
+                division: targetDivision,
+                project: currentFile.name,
+                processingTimeMs: analysisResponse.processing_time_ms,
+                pageCount: parseResult.page_count,
+                divisionCount: parseResult.division_count,
+                tileCount: parseResult.tile_count
+            }
+        };
 
         updateLoadingStatus('Complete!', 100);
         displayResults(analysisResult);
 
     } catch (error) {
-        console.error('[CLIENT] Analysis error:', error);
+        console.error('[API] Analysis error:', error);
         showError(error.message || 'Failed to analyze document. Please try again.');
     }
 }

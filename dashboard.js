@@ -24,24 +24,46 @@ async function loadDashboard() {
         // Load user's jobs
         const { data: jobs, error: jobsError } = await supabase
             .from('jobs')
-            .select(`
-                id,
-                job_name,
-                status,
-                created_at,
-                spec_analyses (
-                    id,
-                    status,
-                    analysis_type
-                )
-            `)
+            .select('id, job_name, status, created_at')
             .eq('user_id', currentUser.id)
             .eq('status', 'active')
             .order('created_at', { ascending: false })
 
         if (jobsError) throw jobsError
 
-        currentJobs = jobs || []
+        // Load specs and analyses separately (new schema: jobs → specs → spec_analyses)
+        const jobIds = (jobs || []).map(j => j.id)
+
+        let specsWithAnalyses = []
+        if (jobIds.length > 0) {
+            const { data: specs } = await supabase
+                .from('specs')
+                .select(`
+                    id,
+                    job_id,
+                    status,
+                    spec_analyses (
+                        id,
+                        division_code,
+                        analysis_type
+                    )
+                `)
+                .in('job_id', jobIds)
+
+            specsWithAnalyses = specs || []
+        }
+
+        // Attach analyses to jobs
+        const jobsWithAnalyses = (jobs || []).map(job => {
+            const jobSpecs = specsWithAnalyses.filter(s => s.job_id === job.id)
+            const allAnalyses = jobSpecs.flatMap(s => s.spec_analyses || [])
+            return {
+                ...job,
+                spec_analyses: allAnalyses
+            }
+        })
+
+        currentJobs = jobsWithAnalyses
         renderJobsTable(currentJobs)
 
         // Load user subscription info
@@ -120,7 +142,9 @@ function renderJobsTable(jobs) {
                         <span class="status-icon">${statusIcon}</span> ${statusText}
                     </span>
                 </td>
-                <td class="analyses-count">${analysisCount}</td>
+                <td class="analyses-count">
+                    ${analysisCount > 0 ? `<button class="btn-history" data-job-id="${job.id}" title="View past analyses">${analysisCount}</button>` : '0'}
+                </td>
                 <td>
                     <button class="btn-chevron">›</button>
                 </td>
@@ -128,11 +152,23 @@ function renderJobsTable(jobs) {
         `
     }).join('')
 
-    // Add click handlers to job rows - Go to job analyses page
+    // Add click handlers to job rows - Go directly to upload page
     document.querySelectorAll('.job-row').forEach(row => {
-        row.addEventListener('click', function() {
+        row.addEventListener('click', function(e) {
+            // Don't navigate if clicking the history button
+            if (e.target.classList.contains('btn-history')) return
+
             const jobId = this.getAttribute('data-job-id')
-            // Go to job analyses page to see all past analyses
+            // Go directly to upload page for new analysis
+            window.location.href = `/upload.html?job_id=${jobId}&analysis_type=general`
+        })
+    })
+
+    // Add click handlers to history buttons - Go to job analyses page
+    document.querySelectorAll('.btn-history').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation()
+            const jobId = this.getAttribute('data-job-id')
             window.location.href = `/job-analyses.html?job_id=${jobId}`
         })
     })
