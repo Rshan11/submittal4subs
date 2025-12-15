@@ -32,6 +32,37 @@ SECTION_PATTERN = re.compile(
 # Cross-reference pattern (same format in body text)
 CROSS_REF_PATTERN = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
 
+# Valid CSI MasterFormat division codes
+VALID_DIVISIONS = [
+    "00",
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "21",
+    "22",
+    "23",
+    "25",
+    "26",
+    "27",
+    "28",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+]
+
 
 # ═══════════════════════════════════════════════════════════════
 # TEXT UTILITIES
@@ -59,6 +90,27 @@ def clean_text(text: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
+def is_likely_date(section: str) -> bool:
+    """
+    Check if section number is probably a date like "04 20 25" (April 20, 2025).
+
+    Date patterns to filter:
+    - MM DD YY format where middle is 1-31 (day) and third is 20-35 (year)
+    """
+    try:
+        parts = section.split()
+        if len(parts) >= 3:
+            month = int(parts[0])
+            day = int(parts[1])
+            year = int(parts[2])
+            # If middle number is 1-31 (day range) and third is 20-35 (year 2020-2035)
+            if 1 <= day <= 31 and 20 <= year <= 35:
+                return True
+    except (ValueError, IndexError):
+        pass
+    return False
+
+
 def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract section number from a page's header/footer.
@@ -82,7 +134,14 @@ def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
         if match.group(4):  # Has decimal part like .13
             section += f".{match.group(4)}"
         division = match.group(1)
-        return section, division
+
+        # Filter out dates and invalid divisions
+        if is_likely_date(section):
+            pass  # Continue to check header
+        elif division not in VALID_DIVISIONS:
+            pass  # Continue to check header
+        else:
+            return section, division
 
     # Check header as backup
     header = text[:300]
@@ -93,6 +152,13 @@ def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
         if match.group(4):
             section += f".{match.group(4)}"
         division = match.group(1)
+
+        # Filter out dates and invalid divisions
+        if is_likely_date(section):
+            return None, None
+        if division not in VALID_DIVISIONS:
+            return None, None
+
         return section, division
 
     return None, None
