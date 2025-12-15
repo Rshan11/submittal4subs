@@ -66,7 +66,9 @@ def clean_text(text: str) -> str:
 def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]:
     """
     Detect if a page contains a division/section header.
-    Handles many format variations found in real specs.
+    Handles many format variations found in real specs including:
+    - 04 20 00, 04 22 00.13, 042200, SECTION 04 22 00.13
+    - DIVISION 04, DIVISION 4
     """
     if not text:
         return None
@@ -75,11 +77,17 @@ def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]
     if not validate_division_context(text):
         return None
 
-    # PATTERN GROUP 1: SECTION with 6-digit code (most reliable)
+    # PATTERN GROUP 1: SECTION with 6-digit code + optional decimal (most reliable)
+    # Matches: SECTION 04 22 00, SECTION 04 22 00.13, SECTION042200.13
     patterns = [
-        r"SECTION\s*(\d{2})\s*(\d{2})\s*(\d{2})",
-        r"^(\d{2})\s*(\d{2})\s*(\d{2})\b",
-        r"(\d{2})\s*(\d{2})\s*(\d{2})\s*[-–—]",
+        # SECTION followed by 6 digits with optional decimal subsection
+        r"SECTION\s*(\d{2})\s*(\d{2})\s*(\d{2})(?:\.\d+)?",
+        # 6 digits at start of line with optional decimal
+        r"^(\d{2})\s*(\d{2})\s*(\d{2})(?:\.\d+)?\b",
+        # 6 digits followed by dash and title
+        r"(\d{2})\s*(\d{2})\s*(\d{2})(?:\.\d+)?\s*[-–—]",
+        # Compact format: 042200 or 042200.13
+        r"\b(\d{2})(\d{2})(\d{2})(?:\.\d+)?\b",
     ]
 
     for pattern in patterns:
