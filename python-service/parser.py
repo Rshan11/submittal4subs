@@ -29,6 +29,13 @@ SECTION_PATTERN = re.compile(
     r"\b(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-](\d+))?\b"
 )
 
+# More specific pattern: section number followed by dash and page number
+# Matches: "04 21 13.13 - 5", "03 30 00 - 12", etc.
+# This is the standard footer format in construction specs
+FOOTER_SECTION_PATTERN = re.compile(
+    r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*-\s*\d+", re.MULTILINE
+)
+
 # Cross-reference pattern (same format in body text)
 CROSS_REF_PATTERN = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
 
@@ -125,15 +132,44 @@ def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
     Returns: (section_number, division_code) or (None, None)
 
     Strategy:
-    1. Check footer (last 300 chars) - most reliable location
-    2. Check header (first 300 chars) - backup
-    3. Footer format is usually: "03 30 00 - 5" (section - page number)
+    1. Use specific footer pattern first: "XX XX XX - #" (section - page number)
+       This avoids matching cross-references that don't have the page indicator
+    2. Fall back to general pattern if specific pattern not found
+    3. Check footer (last 400 chars) first, then header (first 400 chars)
     """
     if not text or len(text) < 100:
         return None, None
 
     # Check footer first (more reliable - section numbers usually at bottom)
-    footer = text[-300:] if len(text) > 300 else text
+    footer = text[-400:] if len(text) > 400 else text
+
+    # Try specific footer pattern first: "04 21 13.13 - 5" format
+    match = FOOTER_SECTION_PATTERN.search(footer)
+
+    if match:
+        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+        if match.group(4):  # Has decimal part like .13
+            section += f".{match.group(4)}"
+        division = match.group(1)
+
+        # Filter out dates and invalid divisions
+        if not is_likely_date(section) and division in VALID_DIVISIONS:
+            return section, division
+
+    # Check header with specific pattern
+    header = text[:400]
+    match = FOOTER_SECTION_PATTERN.search(header)
+
+    if match:
+        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+        if match.group(4):
+            section += f".{match.group(4)}"
+        division = match.group(1)
+
+        if not is_likely_date(section) and division in VALID_DIVISIONS:
+            return section, division
+
+    # Fall back to general pattern in footer (less reliable)
     match = SECTION_PATTERN.search(footer)
 
     if match:
@@ -150,8 +186,7 @@ def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
         else:
             return section, division
 
-    # Check header as backup
-    header = text[:300]
+    # Check header as last resort
     match = SECTION_PATTERN.search(header)
 
     if match:
