@@ -1,16 +1,18 @@
 """
-Page-Level Tagging Parser
+HYBRID PARSER - Four-Tier Page Classification
 
-Each page is processed independently and tagged with its section number.
-No range calculation, no merging, no end-page detection.
+Four-tier approach to page classification:
+0. PDF Outline/Bookmarks (most accurate - built into PDF)
+1. TOC Text Parsing (when PDF has no outline but has text TOC with page numbers)
+2. Footer Pattern Matching (section - page number format)
+3. Keyword Fallback (trade-specific terms)
 
-The key insight: every page in a construction spec has a section identifier
-in the header or footer, like:
-- "03 30 00 - 3" (section 03 30 00, page 3 of that section)
-- "04 22 00.13 - 5" (section 04 22 00.13, page 5)
-- "SECTION 07 92 00 - JOINT SEALANTS"
-
-One page = one section tag. No ranges. No merging.
+Each page is processed and tagged with its section number.
+The classification_method field tracks which tier was used:
+- 'outline' = PDF built-in bookmarks/outline
+- 'toc' = Text-based TOC parsing
+- 'footer' = Header/footer pattern matching
+- 'keyword' = Trade keyword fallback
 """
 
 import gc
@@ -23,24 +25,8 @@ import fitz  # PyMuPDF
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════
 
-# Pattern to find section numbers in headers/footers
-# Matches: "03 30 00", "04 22 00.13", "07-92-00", "032000", etc.
-SECTION_PATTERN = re.compile(
-    r"\b(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-](\d+))?\b"
-)
-
-# More specific pattern: section number followed by dash and page number
-# Matches: "04 21 13.13 - 5", "03 30 00 - 12", etc.
-# This is the standard footer format in construction specs
-FOOTER_SECTION_PATTERN = re.compile(
-    r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*-\s*\d+", re.MULTILINE
-)
-
-# Cross-reference pattern (same format in body text)
-CROSS_REF_PATTERN = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
-
 # Valid CSI MasterFormat division codes
-VALID_DIVISIONS = [
+VALID_DIVISIONS = {
     "00",
     "01",
     "02",
@@ -68,7 +54,36 @@ VALID_DIVISIONS = [
     "33",
     "34",
     "35",
-]
+    "40",
+    "41",
+    "42",
+    "43",
+    "44",
+    "45",
+    "46",
+    "47",
+    "48",
+}
+
+# Trade keywords for Tier 3 fallback classification
+TRADE_KEYWORDS = {
+    "03": ["CONCRETE", "CAST-IN-PLACE", "FORMWORK", "REINFORCEMENT", "REBAR"],
+    "04": ["MASONRY", "CMU", "BRICK", "MORTAR", "GROUT", "UNIT MASONRY", "VENEER"],
+    "05": ["STRUCTURAL STEEL", "METAL FABRICATIONS", "STEEL DECK"],
+    "06": ["CARPENTRY", "ROUGH CARPENTRY", "FINISH CARPENTRY", "MILLWORK"],
+    "07": ["WATERPROOFING", "INSULATION", "ROOFING", "SIDING", "FLASHING"],
+    "08": ["DOORS", "WINDOWS", "HARDWARE", "GLAZING"],
+    "09": ["FINISHES", "GYPSUM", "DRYWALL", "TILE", "FLOORING", "PAINT"],
+    "21": ["FIRE SUPPRESSION", "SPRINKLER"],
+    "22": ["PLUMBING", "PIPING", "FIXTURES"],
+    "23": ["HVAC", "MECHANICAL", "DUCTWORK", "AIR CONDITIONING"],
+    "26": ["ELECTRICAL", "WIRING", "CONDUIT", "PANELS", "LIGHTING"],
+    "27": ["COMMUNICATIONS", "DATA", "TELECOM"],
+    "28": ["FIRE ALARM", "SECURITY", "DETECTION"],
+    "31": ["EARTHWORK", "EXCAVATION", "GRADING", "SITE CLEARING"],
+    "32": ["EXTERIOR IMPROVEMENTS", "PAVING", "LANDSCAPE"],
+    "33": ["UTILITIES", "STORM DRAINAGE", "SANITARY SEWER"],
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -82,7 +97,6 @@ def clean_text(text: str) -> str:
         return ""
 
     # Remove null bytes first - PostgreSQL can't handle these
-    # Common in scanned/OCR'd PDFs
     text = text.replace("\x00", "")
     text = text.replace("\u0000", "")
 
@@ -100,110 +114,403 @@ def clean_text(text: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
-# SECTION DETECTION
+# TIER 0: PDF OUTLINE/BOOKMARKS (Built-in TOC)
 # ═══════════════════════════════════════════════════════════════
 
 
-def is_likely_date(section: str) -> bool:
+def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
     """
-    Check if section number is probably a date like "04 20 25" (April 20, 2025).
+    Extract section -> page mapping from PDF's built-in outline/bookmarks.
 
-    Date patterns to filter:
-    - MM DD YY format where middle is 1-31 (day) and third is 20-35 (year)
+    This is the most reliable method when available - the PDF author has
+    already defined the exact page for each section.
+
+    Returns: {"03 30 00": 70, "04 22 00": 95, ...}
     """
-    try:
-        parts = section.split()
-        if len(parts) >= 3:
-            month = int(parts[0])
-            day = int(parts[1])
-            year = int(parts[2])
-            # If middle number is 1-31 (day range) and third is 20-35 (year 2020-2035)
-            if 1 <= day <= 31 and 20 <= year <= 35:
-                return True
-    except (ValueError, IndexError):
-        pass
-    return False
+    toc = pdf.get_toc()
+    if not toc:
+        return {}
+
+    section_to_page = {}
+
+    # Pattern to extract section number from bookmark title
+    # Matches: "031000", "03 10 00", "033000 RIB - Cast-in-Place Concrete"
+    section_pattern = re.compile(r"(\d{2})\s*(\d{2})\s*(\d{2})(?:\.(\d+))?")
+
+    for entry in toc:
+        level, title, page = entry
+
+        # Try to extract section number from title
+        match = section_pattern.search(title)
+        if match:
+            div = match.group(1)
+
+            # Validate it's a real CSI division
+            if div not in VALID_DIVISIONS:
+                continue
+
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+
+            # Only store if we don't have this section yet (first occurrence wins)
+            if section not in section_to_page:
+                section_to_page[section] = page
+
+    return section_to_page
 
 
-def extract_section_from_page(text: str) -> Tuple[Optional[str], Optional[str]]:
+def assign_pages_from_outline(
+    pages: List[dict], outline_map: Dict[str, int]
+) -> List[dict]:
     """
-    Extract section number from a page's header/footer.
+    Use PDF outline mapping to assign section numbers to pages.
 
-    Returns: (section_number, division_code) or (None, None)
+    Logic: If outline says section 04 22 00 starts on page 95,
+    then pages 95+ are section 04 22 00 until the next section starts.
+    """
+    if not outline_map:
+        return pages
 
-    Strategy:
-    1. Use specific footer pattern first: "XX XX XX - #" (section - page number)
-       This avoids matching cross-references that don't have the page indicator
-    2. Fall back to general pattern if specific pattern not found
-    3. Check footer (last 400 chars) first, then header (first 400 chars)
+    # Sort sections by starting page
+    sorted_sections = sorted(outline_map.items(), key=lambda x: x[1])
+
+    for page in pages:
+        page_num = page["page_number"]
+
+        # Find which section this page belongs to
+        assigned_section = None
+        for i, (section, start_page) in enumerate(sorted_sections):
+            if page_num >= start_page:
+                # Check if there's a next section
+                if i + 1 < len(sorted_sections):
+                    next_start = sorted_sections[i + 1][1]
+                    if page_num < next_start:
+                        assigned_section = section
+                        break
+                else:
+                    # Last section - assign if page >= start
+                    assigned_section = section
+
+        if assigned_section:
+            page["section_number"] = assigned_section
+            page["division_code"] = assigned_section[:2]
+            page["classification_method"] = "outline"
+
+    return pages
+
+
+# ═══════════════════════════════════════════════════════════════
+# TIER 1: TEXT-BASED TABLE OF CONTENTS / INDEX PARSING
+# ═══════════════════════════════════════════════════════════════
+
+
+def find_toc_pages(pages: List[dict]) -> List[int]:
+    """
+    Find pages that are likely Table of Contents.
+    Usually in first 50 pages, contains "TABLE OF CONTENTS" or "CONTENTS"
+    and multiple section number references.
+    """
+    toc_pages = []
+
+    for page in pages[:50]:  # Only check first 50 pages
+        text = page.get("content", "").upper()
+
+        # Check for TOC indicators
+        has_toc_header = any(
+            marker in text
+            for marker in [
+                "TABLE OF CONTENTS",
+                "CONTENTS",
+                "INDEX OF SPECIFICATIONS",
+                "SPECIFICATION INDEX",
+            ]
+        )
+
+        # Count section number patterns on the page
+        section_pattern = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
+        section_matches = section_pattern.findall(text)
+
+        # If has TOC header AND multiple section numbers, it's likely TOC
+        if has_toc_header and len(section_matches) >= 5:
+            toc_pages.append(page["page_number"])
+
+    return toc_pages
+
+
+def find_index_pages(pages: List[dict]) -> List[int]:
+    """
+    Find pages that are likely an Index (usually at end of document).
+    Check last 50 pages for "INDEX" header and multiple section references.
+    """
+    index_pages = []
+
+    # Check last 50 pages
+    last_50 = pages[-50:] if len(pages) > 50 else pages
+
+    for page in last_50:
+        text = page.get("content", "").upper()
+
+        # Check for Index indicators
+        has_index_header = any(
+            marker in text
+            for marker in [
+                "INDEX",
+                "SPECIFICATION INDEX",
+                "SECTION INDEX",
+                "INDEX OF SECTIONS",
+            ]
+        )
+
+        # Count section number patterns on the page
+        section_pattern = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
+        section_matches = section_pattern.findall(text)
+
+        # If has Index header AND multiple section numbers, it's likely Index
+        if has_index_header and len(section_matches) >= 5:
+            index_pages.append(page["page_number"])
+
+    return index_pages
+
+
+def parse_toc(toc_text: str) -> Dict[str, int]:
+    """
+    Parse TOC to extract section -> starting page mapping.
+
+    TOC formats vary, but common patterns:
+    - "04 22 00 CONCRETE UNIT MASONRY............120"
+    - "SECTION 04 22 00 - CONCRETE UNIT MASONRY     120"
+    - "04 22 00    Concrete Unit Masonry    Page 120"
+
+    Returns: {"04 22 00": 120, "04 21 13.13": 115, ...}
+    """
+    section_to_page = {}
+
+    # Pattern: section number followed eventually by a page number
+    # Handles dots, dashes, spaces between section and page
+    pattern = re.compile(
+        r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"  # Section number
+        r"[^\d]*?"  # Non-digit chars (title, dots)
+        r"(\d{1,4})\s*$",  # Page number at end of line
+        re.MULTILINE,
+    )
+
+    for match in pattern.finditer(toc_text):
+        div = match.group(1)
+
+        # Validate it's a real CSI division
+        if div not in VALID_DIVISIONS:
+            continue
+
+        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+        if match.group(4):  # Has subsection like .13
+            section += f".{match.group(4)}"
+
+        page_num = int(match.group(5))
+
+        # Sanity check - page numbers should be reasonable
+        if 1 <= page_num <= 5000:
+            section_to_page[section] = page_num
+
+    return section_to_page
+
+
+def assign_pages_from_toc(pages: List[dict], toc_map: Dict[str, int]) -> List[dict]:
+    """
+    Use TOC mapping to assign section numbers to pages.
+
+    Logic: If TOC says section 04 22 00 starts on page 120,
+    then pages 120+ are section 04 22 00 until the next section starts.
+    """
+    if not toc_map:
+        return pages
+
+    # Sort sections by starting page
+    sorted_sections = sorted(toc_map.items(), key=lambda x: x[1])
+
+    for page in pages:
+        page_num = page["page_number"]
+
+        # Find which section this page belongs to
+        assigned_section = None
+        for i, (section, start_page) in enumerate(sorted_sections):
+            # Check if this page is in range for this section
+            if page_num >= start_page:
+                # Check if there's a next section
+                if i + 1 < len(sorted_sections):
+                    next_start = sorted_sections[i + 1][1]
+                    if page_num < next_start:
+                        assigned_section = section
+                        break
+                else:
+                    # Last section - assign if page >= start
+                    assigned_section = section
+
+        if assigned_section:
+            page["section_number"] = assigned_section
+            page["division_code"] = assigned_section[:2]
+            page["classification_method"] = "toc"
+
+    return pages
+
+
+# ═══════════════════════════════════════════════════════════════
+# TIER 2: FOOTER PATTERN MATCHING
+# ═══════════════════════════════════════════════════════════════
+
+
+def is_valid_division(d1: str, d2: str, d3: str) -> bool:
+    """
+    Validate that a section number is a real CSI division, not a date.
+
+    CSI Divisions: 00-14, 21-28, 31-35, 40-48
+    Date pattern: MM DD YY where DD is 1-31, YY is 20-35
+    """
+    div = int(d1)
+    mid = int(d2)
+    last = int(d3)
+
+    # Check if it's a valid CSI division
+    if d1 not in VALID_DIVISIONS:
+        return False
+
+    # Check for date pattern: if middle number is 1-31 and last is 20-35
+    # it's probably a date like 04 20 25 (April 20, 2025)
+    if 1 <= mid <= 31 and 20 <= last <= 35:
+        # Additional check: real sections have middle numbers like 00, 05, 10, 20, 21, 22...
+        # Dates have middle numbers like 01-31
+        # If middle looks like a day (1-31 but not common section patterns), it's probably a date
+        common_section_mids = {
+            0,
+            5,
+            10,
+            15,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            30,
+            35,
+            40,
+            50,
+            60,
+            70,
+            80,
+            90,
+        }
+        if mid not in common_section_mids and 1 <= mid <= 28:
+            return False  # Likely a date
+
+    return True
+
+
+def extract_section_from_footer(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract section number from footer using strict pattern.
+
+    Key insight: Real section footers have format "XX XX XX - #" where # is page number.
+    Cross-references in body text don't have this format.
+
+    Examples of REAL footers:
+    - "04 21 13.13 - 5"
+    - "03 30 00 - 12"
+    - "26 05 00 - 1"
+
+    Examples of FALSE MATCHES to avoid:
+    - "see Section 07 15 00" (cross-reference, no page number)
+    - "04 20 25" (date: April 20, 2025)
     """
     if not text or len(text) < 100:
         return None, None
 
-    # Check footer first (more reliable - section numbers usually at bottom)
-    footer = text[-400:] if len(text) > 400 else text
+    # Check both header (first 600 chars) and footer (last 600 chars)
+    header = text[:600] if len(text) > 600 else text
+    footer = text[-600:] if len(text) > 600 else text
 
-    # Try specific footer pattern first: "04 21 13.13 - 5" format
-    match = FOOTER_SECTION_PATTERN.search(footer)
+    # STRICT pattern 1: section number + dash + page number (with optional "/ total")
+    # Matches: "03 30 00 - 12", "00 01 10 - 1 / 9"
+    strict_pattern = re.compile(
+        r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*(\d{1,3})(?:\s*/\s*\d+)?",
+        re.MULTILINE,
+    )
 
+    # STRICT pattern 2: "SECTION XX XX XX" in header (common format)
+    section_header_pattern = re.compile(
+        r"SECTION\s+(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?", re.IGNORECASE
+    )
+
+    # Try footer first (most reliable)
+    match = strict_pattern.search(footer)
     if match:
-        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-        if match.group(4):  # Has decimal part like .13
-            section += f".{match.group(4)}"
-        division = match.group(1)
+        div = match.group(1)
+        if is_valid_division(match.group(1), match.group(2), match.group(3)):
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
 
-        # Filter out dates and invalid divisions
-        if not is_likely_date(section) and division in VALID_DIVISIONS:
-            return section, division
-
-    # Check header with specific pattern
-    header = text[:400]
-    match = FOOTER_SECTION_PATTERN.search(header)
-
+    # Try header with strict pattern
+    match = strict_pattern.search(header)
     if match:
-        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-        if match.group(4):
-            section += f".{match.group(4)}"
-        division = match.group(1)
+        div = match.group(1)
+        if is_valid_division(match.group(1), match.group(2), match.group(3)):
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
 
-        if not is_likely_date(section) and division in VALID_DIVISIONS:
-            return section, division
-
-    # Fall back to general pattern in footer (less reliable)
-    match = SECTION_PATTERN.search(footer)
-
+    # Try "SECTION XX XX XX" pattern in header
+    match = section_header_pattern.search(header)
     if match:
-        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-        if match.group(4):  # Has decimal part like .13
-            section += f".{match.group(4)}"
-        division = match.group(1)
-
-        # Filter out dates and invalid divisions
-        if is_likely_date(section):
-            pass  # Continue to check header
-        elif division not in VALID_DIVISIONS:
-            pass  # Continue to check header
-        else:
-            return section, division
-
-    # Check header as last resort
-    match = SECTION_PATTERN.search(header)
-
-    if match:
-        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-        if match.group(4):
-            section += f".{match.group(4)}"
-        division = match.group(1)
-
-        # Filter out dates and invalid divisions
-        if is_likely_date(section):
-            return None, None
-        if division not in VALID_DIVISIONS:
-            return None, None
-
-        return section, division
+        div = match.group(1)
+        if is_valid_division(match.group(1), match.group(2), match.group(3)):
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
 
     return None, None
+
+
+# ═══════════════════════════════════════════════════════════════
+# TIER 3: KEYWORD FALLBACK
+# ═══════════════════════════════════════════════════════════════
+
+
+def classify_by_keywords(text: str) -> Optional[str]:
+    """
+    Fallback: classify page by trade-specific keywords.
+    Only use when TOC and footer detection fail.
+
+    Returns division code or None.
+    """
+    text_upper = text.upper()
+
+    keyword_scores = {}
+
+    for division, keywords in TRADE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_upper)
+        if score > 0:
+            keyword_scores[division] = score
+
+    if not keyword_scores:
+        return None
+
+    # Return division with highest keyword match
+    best_division = max(keyword_scores, key=keyword_scores.get)
+
+    # Only return if we have at least 2 keyword matches (confidence threshold)
+    if keyword_scores[best_division] >= 2:
+        return best_division
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# CROSS-REFERENCE EXTRACTION
+# ═══════════════════════════════════════════════════════════════
 
 
 def extract_cross_references(text: str, own_section: Optional[str]) -> List[str]:
@@ -211,50 +518,54 @@ def extract_cross_references(text: str, own_section: Optional[str]) -> List[str]
     Find all section numbers mentioned in the page text.
     Exclude the page's own section number.
     """
-    matches = CROSS_REF_PATTERN.findall(text)
-    refs = set()
+    pattern = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
+    matches = pattern.findall(text)
 
+    refs = set()
     for m in matches:
         ref = f"{m[0]} {m[1]} {m[2]}"
-        # Don't include self-references
-        if (
-            own_section and ref == own_section[:11]
-        ):  # Compare base section (first 11 chars)
+        # Skip self-references
+        if own_section and ref == own_section[:11]:
             continue
-        refs.add(ref)
+        # Validate it's a real section
+        if is_valid_division(m[0], m[1], m[2]):
+            refs.add(ref)
 
     return sorted(list(refs))
 
 
 # ═══════════════════════════════════════════════════════════════
-# MAIN PARSE FUNCTION
+# MAIN HYBRID PARSER
 # ═══════════════════════════════════════════════════════════════
 
 
 def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     """
-    Parse PDF into individual page records with section tags.
-
-    Each page is processed independently:
-    1. Extract text
-    2. Detect section number from header/footer
-    3. Find cross-references in body text
-    4. Store as single page record
+    Hybrid parser using 4-tier approach:
+    0. Try PDF outline/bookmarks first (most reliable)
+    1. Try text-based TOC parsing
+    2. Fall back to footer pattern matching
+    3. Use keyword classification as last resort
 
     Returns dict with pages ready for database insert.
     """
     pages = []
 
-    print(f"[PARSE] Starting page-level parse for spec {spec_id}")
+    print(f"[PARSE] Starting hybrid parse for spec {spec_id}")
     print(f"[PARSE] PDF size: {len(pdf_bytes):,} bytes")
 
     pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(pdf)
     print(f"[PARSE] Total pages: {total_pages}")
 
-    divisions_found = set()
-    sections_found = set()
+    # TIER 0: Try PDF outline/bookmarks first (before extracting pages)
+    outline_map = extract_pdf_outline(pdf)
+    if outline_map:
+        print(f"[PARSE] Found PDF outline with {len(outline_map)} sections")
+    else:
+        print("[PARSE] No PDF outline/bookmarks found")
 
+    # Extract all pages
     for page_num in range(total_pages):
         page = pdf[page_num]
         text = clean_text(page.get_text())
@@ -263,46 +574,173 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         if not text or len(text.strip()) < 50:
             continue
 
-        # Extract section number from header/footer
-        section_number, division_code = extract_section_from_page(text)
-
-        if division_code:
-            divisions_found.add(division_code)
-        if section_number:
-            sections_found.add(section_number)
-
-        # Find cross-references in the text
-        cross_refs = extract_cross_references(text, section_number)
-
         pages.append(
             {
                 "spec_id": spec_id,
-                "page_number": page_num + 1,  # 1-indexed
-                "section_number": section_number,
-                "division_code": division_code,
+                "page_number": page_num + 1,
                 "content": text,
                 "char_count": len(text),
-                "cross_refs": cross_refs if cross_refs else None,
+                "section_number": None,
+                "division_code": None,
+                "classification_method": None,
             }
         )
 
         # Progress logging every 100 pages
         if (page_num + 1) % 100 == 0:
-            print(f"[PARSE] Processed {page_num + 1}/{total_pages} pages...")
+            print(f"[PARSE] Extracted {page_num + 1}/{total_pages} pages...")
             gc.collect()
 
     pdf.close()
 
+    print(f"[PARSE] Extracted {len(pages)} pages with content")
+
+    # Apply TIER 0: PDF outline classification
+    if outline_map:
+        pages = assign_pages_from_outline(pages, outline_map)
+        outline_classified = sum(
+            1 for p in pages if p.get("classification_method") == "outline"
+        )
+        print(f"[PARSE] Outline classified {outline_classified} pages")
+
+    # TIER 1: Try text-based TOC and Index parsing, use whichever finds more sections
+    toc_pages = find_toc_pages(pages)
+    index_pages = find_index_pages(pages)
+    toc_map = {}
+    index_map = {}
+
+    # Parse TOC if found
+    if toc_pages:
+        print(f"[PARSE] Found text TOC on pages: {toc_pages}")
+        toc_text = "\n".join(
+            [p["content"] for p in pages if p["page_number"] in toc_pages]
+        )
+        toc_map = parse_toc(toc_text)
+        if toc_map:
+            print(f"[PARSE] TOC mapped {len(toc_map)} sections")
+
+    # Parse Index if found
+    if index_pages:
+        print(f"[PARSE] Found Index on pages: {index_pages}")
+        index_text = "\n".join(
+            [p["content"] for p in pages if p["page_number"] in index_pages]
+        )
+        index_map = parse_toc(index_text)  # Same parsing logic works for Index
+        if index_map:
+            print(f"[PARSE] Index mapped {len(index_map)} sections")
+
+    # Use whichever found more sections
+    best_map = {}
+    best_source = None
+    if len(index_map) > len(toc_map):
+        best_map = index_map
+        best_source = "index"
+        if toc_map:
+            print(
+                f"[PARSE] Using Index ({len(index_map)} sections) over TOC ({len(toc_map)} sections)"
+            )
+    elif toc_map:
+        best_map = toc_map
+        best_source = "toc"
+        if index_map:
+            print(
+                f"[PARSE] Using TOC ({len(toc_map)} sections) over Index ({len(index_map)} sections)"
+            )
+
+    # Apply the best mapping to unclassified pages
+    if best_map:
+        sorted_sections = sorted(best_map.items(), key=lambda x: x[1])
+        for page in pages:
+            if page["section_number"] is None:
+                page_num = page["page_number"]
+                for i, (section, start_page) in enumerate(sorted_sections):
+                    if page_num >= start_page:
+                        if i + 1 < len(sorted_sections):
+                            next_start = sorted_sections[i + 1][1]
+                            if page_num < next_start:
+                                page["section_number"] = section
+                                page["division_code"] = section[:2]
+                                page["classification_method"] = best_source
+                                break
+                        else:
+                            page["section_number"] = section
+                            page["division_code"] = section[:2]
+                            page["classification_method"] = best_source
+
+    if not toc_pages and not index_pages:
+        print("[PARSE] No text TOC or Index found")
+
+    # TIER 2 & 3: For pages not classified, try footer then keywords
+    for page in pages:
+        if page["section_number"] is not None:
+            continue  # Already classified
+
+        # Try footer pattern
+        section, division = extract_section_from_footer(page["content"])
+        if section:
+            page["section_number"] = section
+            page["division_code"] = division
+            page["classification_method"] = "footer"
+            continue
+
+        # Try keyword fallback
+        division = classify_by_keywords(page["content"])
+        if division:
+            page["division_code"] = division
+            page["classification_method"] = "keyword"
+            # Note: section_number stays None for keyword-classified pages
+
+    # Extract cross-references for all pages
+    for page in pages:
+        page["cross_refs"] = extract_cross_references(
+            page["content"], page.get("section_number")
+        )
+        # Convert empty list to None for database
+        if not page["cross_refs"]:
+            page["cross_refs"] = None
+
+    # Build classification stats
+    classified = sum(1 for p in pages if p["division_code"])
+    outline_classified = sum(
+        1 for p in pages if p.get("classification_method") == "outline"
+    )
+    toc_classified = sum(1 for p in pages if p.get("classification_method") == "toc")
+    index_classified = sum(
+        1 for p in pages if p.get("classification_method") == "index"
+    )
+    footer_classified = sum(
+        1 for p in pages if p.get("classification_method") == "footer"
+    )
+    keyword_classified = sum(
+        1 for p in pages if p.get("classification_method") == "keyword"
+    )
+    unclassified = len(pages) - classified
+
+    print(f"[PARSE] Classification summary:")
+    print(f"[PARSE]   Total pages: {len(pages)}")
+    print(f"[PARSE]   Classified: {classified}")
+    print(f"[PARSE]     - By PDF outline: {outline_classified}")
+    print(f"[PARSE]     - By text TOC: {toc_classified}")
+    print(f"[PARSE]     - By Index: {index_classified}")
+    print(f"[PARSE]     - By footer: {footer_classified}")
+    print(f"[PARSE]     - By keyword: {keyword_classified}")
+    print(f"[PARSE]   Unclassified: {unclassified}")
+
     # Build division summary
+    divisions_found = set()
+    sections_found = set()
     division_summary = {}
+
     for p in pages:
         div = p["division_code"]
         if div:
+            divisions_found.add(div)
             if div not in division_summary:
                 division_summary[div] = {"pages": [], "count": 0, "sections": set()}
             division_summary[div]["pages"].append(p["page_number"])
             division_summary[div]["count"] += 1
             if p["section_number"]:
+                sections_found.add(p["section_number"])
                 division_summary[div]["sections"].add(p["section_number"])
 
     # Convert sections set to list for JSON serialization
@@ -311,9 +749,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             list(division_summary[div]["sections"])
         )
 
-    print(
-        f"[PARSE] Complete: {len(pages)} pages with content, {len(divisions_found)} divisions"
-    )
+    print(f"[PARSE] Found {len(divisions_found)} divisions:")
     for div in sorted(division_summary.keys()):
         info = division_summary[div]
         print(
@@ -326,6 +762,22 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         "divisions": sorted(list(divisions_found)),
         "division_summary": division_summary,
         "sections": sorted(list(sections_found)),
+        "outline_found": len(outline_map) > 0,
+        "outline_sections_mapped": len(outline_map),
+        "toc_found": len(toc_pages) > 0,
+        "toc_sections_mapped": len(toc_map),
+        "index_found": len(index_pages) > 0,
+        "index_sections_mapped": len(index_map),
+        "classification_stats": {
+            "total": len(pages),
+            "classified": classified,
+            "outline": outline_classified,
+            "toc": toc_classified,
+            "index": index_classified,
+            "footer": footer_classified,
+            "keyword": keyword_classified,
+            "unclassified": unclassified,
+        },
     }
 
 
@@ -338,6 +790,9 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
 
 TILE_SIZE = 4000  # Characters per tile
 TILE_OVERLAP = 500  # Overlap between tiles
+
+# Cross-reference pattern for legacy functions
+CROSS_REF_PATTERN = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
 
 
 def tile_text(

@@ -112,6 +112,8 @@ class ParseResponse(BaseModel):
     page_count: int
     division_count: int
     divisions: list
+    toc_found: bool = False
+    classification_stats: dict = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -296,6 +298,8 @@ async def parse_spec_endpoint(spec_id: str):
             page_count=result["page_count"],
             division_count=len(result["divisions"]),
             divisions=division_list,
+            toc_found=result.get("toc_found", False),
+            classification_stats=result.get("classification_stats"),
         )
 
     except Exception as e:
