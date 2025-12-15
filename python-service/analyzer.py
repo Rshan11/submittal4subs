@@ -1,10 +1,12 @@
 """
 AI Analysis - Gemini + OpenAI Two-Stage Pipeline
 """
-import os
+
 import json
+import os
+from typing import Any, Dict, List, Optional
+
 import httpx
-from typing import Dict, Any, List, Optional
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -19,38 +21,38 @@ TRADE_CONFIGS = {
         "division": "04",
         "name": "Masonry",
         "emoji": "🧱",
-        "keywords": ["MASONRY", "BRICK", "CMU", "MORTAR", "GROUT", "UNIT MASONRY"]
+        "keywords": ["MASONRY", "BRICK", "CMU", "MORTAR", "GROUT", "UNIT MASONRY"],
     },
     "concrete": {
         "division": "03",
         "name": "Concrete",
         "emoji": "🏗️",
-        "keywords": ["CONCRETE", "CAST-IN-PLACE", "FORMWORK", "REINFORCEMENT"]
+        "keywords": ["CONCRETE", "CAST-IN-PLACE", "FORMWORK", "REINFORCEMENT"],
     },
     "steel": {
         "division": "05",
         "name": "Structural Steel",
         "emoji": "🔩",
-        "keywords": ["STRUCTURAL STEEL", "METAL FABRICATIONS", "STEEL JOISTS"]
+        "keywords": ["STRUCTURAL STEEL", "METAL FABRICATIONS", "STEEL JOISTS"],
     },
     "electrical": {
         "division": "26",
         "name": "Electrical",
         "emoji": "⚡",
-        "keywords": ["ELECTRICAL", "WIRING", "CONDUCTORS", "PANELBOARDS"]
+        "keywords": ["ELECTRICAL", "WIRING", "CONDUCTORS", "PANELBOARDS"],
     },
     "plumbing": {
         "division": "22",
         "name": "Plumbing",
         "emoji": "🔧",
-        "keywords": ["PLUMBING", "PIPING", "FIXTURES", "PUMPS"]
+        "keywords": ["PLUMBING", "PIPING", "FIXTURES", "PUMPS"],
     },
     "mechanical": {
         "division": "23",
         "name": "Mechanical/HVAC",
         "emoji": "❄️",
-        "keywords": ["HVAC", "MECHANICAL", "DUCTWORK", "AIR HANDLING"]
-    }
+        "keywords": ["HVAC", "MECHANICAL", "DUCTWORK", "AIR HANDLING"],
+    },
 }
 
 
@@ -58,14 +60,13 @@ TRADE_CONFIGS = {
 # GEMINI ANALYSIS
 # ═══════════════════════════════════════════════════════════════
 
+
 async def analyze_division_with_gemini(
-    division_text: str,
-    trade: str,
-    project_name: Optional[str] = None
+    division_text: str, trade: str, project_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Stage 1: Gemini extracts materials, submittals, coordination items
-    Returns markdown-formatted analysis
+    Stage 1: Gemini exhaustively extracts ALL product data from specification
+    Universal prompt works for any division - pulls everything verbatim
     """
     config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS["masonry"])
     trade_emoji = config["emoji"]
@@ -78,81 +79,122 @@ async def analyze_division_with_gemini(
     if len(division_text) > max_chars:
         text_to_analyze += "\n\n[TRUNCATED - additional content not shown]"
 
-    prompt = f"""You are a {trade} contractor analyzing Division {division} specifications. Create a CONDENSED, ACTIONABLE summary for bidding and field use.
+    prompt = f"""You are extracting COMPLETE product specifications from a construction spec document. DO NOT SUMMARIZE. List EVERY specific product mentioned with FULL details.
 
 PROJECT: {project_name or "Construction Project"}
 
 SPECIFICATION TEXT:
 {text_to_analyze}
 
-Format your response EXACTLY like this example (use markdown):
+---
 
-{trade_emoji} {trade_name} Division Summary (Condensed Contractor Format)
+Extract ALL of the following. Be EXHAUSTIVE - miss nothing:
 
-## 1. Materials
+## 1. Manufacturers & Products
 
-### Primary Materials
-- **Material Name** — ASTM Standard, Grade/Type
-- List all materials with their specifications
+List EVERY manufacturer and product mentioned:
+| Manufacturer | Product Name/Series | Model/Part Number | Notes |
+|--------------|---------------------|-------------------|-------|
+| (list all) | | | |
 
-### Accessories
-- **Item** — specification details
+If "or equal" or "approved equal" is specified, note it. If basis of design, note it.
 
-## 2. Execution Requirements
+## 2. Standards & References
 
-### Weather Conditions
-- Cold weather procedures
-- Hot weather procedures
+List EVERY ASTM, ANSI, ACI, AWS, or other standard reference with COMPLETE designation:
+| Standard | Full Designation | Type/Grade/Class | Application |
+|----------|------------------|------------------|-------------|
+| ASTM C90 | Standard Specification for Loadbearing Concrete Masonry Units | Type I, Normal Weight | CMU |
+| (list all) | | | |
 
-### Quality Standards
-- Tolerances and standards
-- Testing requirements
+Include the COMPLETE reference (e.g., "ASTM A615/A615M, Grade 60" not just "ASTM A615")
 
-## 3. Related Divisions & Coordination
+## 3. Material Specifications
 
-### Referenced Sections (items spec'd elsewhere)
-| Item | See Section | Who Provides | Who Installs |
-|------|-------------|--------------|--------------|
-| Item name | XX XX XX | Div X | Div X |
+For EACH material specified, capture ALL properties:
 
-### Scope Clarifications
-- **BY {trade.upper()}**: Items explicitly assigned to this trade
-- **BY OTHERS**: Items provided/installed by other trades
-- **COORDINATE WITH**: Items requiring coordination
+### [Material Name]
+- **Type/Grade**:
+- **Size/Dimensions**:
+- **Weight/Gauge/Thickness**:
+- **Finish/Coating**:
+- **Color**:
+- **Fire Rating**:
+- **Performance Requirements**:
+- **ASTM/Standard**:
 
-### Cost Impact Items
-- Items that may affect your bid
+(Repeat for every material - include ALL that are specified)
+
+## 4. Accessories & Components
+
+List EVERY accessory, anchor, fastener, reinforcement, etc.:
+| Item | Specification | Size/Type | Material | Standard |
+|------|---------------|-----------|----------|----------|
+| (list all) | | | | |
+
+## 5. Submittals Required
+
+List every submittal explicitly required:
+- [ ] Product Data for: (list items)
+- [ ] Shop Drawings for: (list items)
+- [ ] Samples for: (list items, include size if specified)
+- [ ] Certificates for: (list items)
+- [ ] Test Reports for: (list items)
+- [ ] Warranties for: (list items)
+
+## 6. Coordination With Other Trades
+
+| Item | Referenced Section | Provided By | Installed By |
+|------|-------------------|-------------|--------------|
+| (list all cross-references) | | | |
+
+## 7. Execution Requirements
+
+### Quality/Testing
+- List specific tests required
+- Tolerances specified
+- Inspection requirements
+
+### Environmental Limits
+- Temperature limits (hot/cold weather)
+- Humidity/moisture requirements
+- Curing requirements
+
+### Prohibited Items
+- List anything explicitly NOT allowed
 
 ---
 
-RULES:
-1. Be CONCISE - use bullet points, not paragraphs
-2. BOLD the key specs (ASTM numbers, dimensions, types)
-3. Group related items under clear headers
-4. Include ALL ASTM/standard references found
-5. Note any special restrictions (no X allowed, requires approval)
-6. Skip sections if not found in the spec
-7. Use em-dashes (—) to separate item names from specs
-8. Extract ALL cross-references to other divisions
-9. Note WHO provides vs WHO installs for each referenced item"""
+CRITICAL RULES:
+1. DO NOT SUMMARIZE - list every item verbatim
+2. Include COMPLETE specification references (full ASTM designation with type/grade)
+3. Capture ALL dimensions, weights, gauges, ratings
+4. Note manufacturer preferences (basis of design, or equal, no substitution)
+5. If a property is specified, include it - don't skip details
+6. Use tables for easy scanning
+7. Leave sections empty if not found - don't make things up"""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 16000
-                }
-            }
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
+            },
         )
 
         if response.status_code != 200:
-            raise Exception(f"Gemini API error: {response.status_code} - {response.text}")
+            raise Exception(
+                f"Gemini API error: {response.status_code} - {response.text}"
+            )
 
         data = response.json()
-        result_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        result_text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
 
         if not result_text:
             raise Exception("No response from Gemini")
@@ -161,13 +203,12 @@ RULES:
             "summary": result_text,
             "format": "markdown",
             "trade": trade,
-            "division": division
+            "division": division,
         }
 
 
 async def analyze_contract_terms(
-    div01_text: str,
-    project_name: Optional[str] = None
+    div01_text: str, project_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Analyze Division 00-01 for contract terms
@@ -244,22 +285,24 @@ RULES:
             f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 8000
-                }
-            }
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8000},
+            },
         )
 
         if response.status_code != 200:
             return {"summary": "Contract analysis failed", "error": response.text}
 
         data = response.json()
-        result_text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        result_text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
 
         return {
             "summary": result_text or "No contract terms found",
-            "format": "markdown"
+            "format": "markdown",
         }
 
 
@@ -267,11 +310,12 @@ RULES:
 # OPENAI FINAL SUMMARY
 # ═══════════════════════════════════════════════════════════════
 
+
 async def create_executive_summary(
     trade_summary: str,
     contract_summary: str,
     trade: str,
-    project_name: Optional[str] = None
+    project_name: Optional[str] = None,
 ) -> str:
     """
     Stage 2: OpenAI creates executive bid summary
@@ -324,41 +368,43 @@ Keep it CONCISE and ACTIONABLE. This is a quick-reference for bid day."""
             OPENAI_API_URL,
             headers={
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             },
             json={
                 "model": "gpt-4o-mini",
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a construction bidding expert creating concise, actionable bid summaries for contractors."
+                        "content": "You are a construction bidding expert creating concise, actionable bid summaries for contractors.",
                     },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 2000
-            }
+                "max_tokens": 2000,
+            },
         )
 
         if response.status_code != 200:
             return "Executive summary generation failed"
 
         data = response.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "No summary generated")
+        return (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "No summary generated")
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
 # FULL ANALYSIS PIPELINE
 # ═══════════════════════════════════════════════════════════════
 
+
 async def run_full_analysis(
     division_text: str,
     div01_text: Optional[str],
     trade: str,
-    project_name: Optional[str] = None
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run complete two-stage analysis pipeline:
@@ -380,10 +426,14 @@ async def run_full_analysis(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Handle results
-    trade_analysis = results[0] if not isinstance(results[0], Exception) else {
-        "summary": f"Trade analysis failed: {results[0]}",
-        "error": str(results[0])
-    }
+    trade_analysis = (
+        results[0]
+        if not isinstance(results[0], Exception)
+        else {
+            "summary": f"Trade analysis failed: {results[0]}",
+            "error": str(results[0]),
+        }
+    )
 
     contract_analysis = None
     if len(results) > 1 and not isinstance(results[1], Exception):
@@ -397,7 +447,7 @@ async def run_full_analysis(
                 trade_analysis.get("summary", ""),
                 contract_analysis.get("summary", ""),
                 trade,
-                project_name
+                project_name,
             )
         except Exception as e:
             executive_summary = f"Executive summary failed: {e}"
@@ -408,7 +458,7 @@ async def run_full_analysis(
         "trade_analysis": trade_analysis,
         "contract_analysis": contract_analysis,
         "executive_summary": executive_summary,
-        "processing_time_ms": processing_time_ms
+        "processing_time_ms": processing_time_ms,
     }
 
 
