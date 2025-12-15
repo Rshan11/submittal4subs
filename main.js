@@ -49,7 +49,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const jobId = urlParams.get("job_id");
 const analysisType = urlParams.get("analysis_type");
 
-// Get current user
+// Get current user and check for existing spec
 let currentUser = null;
 (async () => {
   const {
@@ -70,7 +70,115 @@ let currentUser = null;
   if (navEmailEl && user) {
     navEmailEl.textContent = user.email;
   }
+
+  // Check if job already has a spec - if so, load it instead of showing upload
+  if (jobId && user) {
+    await checkForExistingSpec(jobId);
+  }
 })();
+
+// Check if job already has a parsed spec
+async function checkForExistingSpec(jobId) {
+  try {
+    console.log("[SPEC] Checking for existing spec on job:", jobId);
+
+    const { data: existingSpec, error } = await supabase
+      .from("specs")
+      .select("id, original_name, status, page_count")
+      .eq("job_id", jobId)
+      .eq("status", "ready")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !existingSpec) {
+      console.log("[SPEC] No existing spec found, showing upload form");
+      return;
+    }
+
+    console.log("[SPEC] Found existing spec:", existingSpec);
+    currentSpecId = existingSpec.id;
+
+    // Load divisions from spec_pages
+    const divisions = await loadDivisionsFromDatabase(existingSpec.id);
+
+    if (divisions && divisions.length > 0) {
+      // Show spec loaded state with division selector
+      showSpecLoaded(existingSpec, divisions);
+    } else {
+      console.log("[SPEC] No divisions found, showing upload form");
+    }
+  } catch (err) {
+    console.error("[SPEC] Error checking for existing spec:", err);
+  }
+}
+
+// Load divisions from spec_pages table
+async function loadDivisionsFromDatabase(specId) {
+  try {
+    const { data, error } = await supabase
+      .from("spec_pages")
+      .select("division_code, section_number, page_number")
+      .eq("spec_id", specId)
+      .not("division_code", "is", null);
+
+    if (error) throw error;
+
+    // Aggregate by division
+    const divisionMap = {};
+    for (const row of data) {
+      const div = row.division_code;
+      if (!divisionMap[div]) {
+        divisionMap[div] = { code: div, page_count: 0, sections: new Set() };
+      }
+      divisionMap[div].page_count++;
+      if (row.section_number) {
+        divisionMap[div].sections.add(row.section_number);
+      }
+    }
+
+    // Convert to array and sort
+    const divisions = Object.values(divisionMap)
+      .map((d) => ({
+        code: d.code,
+        page_count: d.page_count,
+        section_count: d.sections.size,
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+
+    console.log("[SPEC] Loaded divisions:", divisions);
+    return divisions;
+  } catch (err) {
+    console.error("[SPEC] Error loading divisions:", err);
+    return [];
+  }
+}
+
+// Show the spec loaded state with division selector
+function showSpecLoaded(spec, divisions) {
+  console.log("[SPEC] Showing spec loaded state");
+
+  // Hide upload section
+  if (uploadSection) uploadSection.style.display = "none";
+
+  // Populate and show division section
+  populateDivisionDropdown(divisions);
+
+  // Update scan summary to show spec info
+  if (scanSummary) {
+    const totalPages =
+      spec.page_count || divisions.reduce((sum, d) => sum + d.page_count, 0);
+    scanSummary.innerHTML = `
+      <strong>Spec loaded:</strong> ${spec.original_name}<br>
+      <span style="color: #666; font-size: 0.9em;">
+        ${divisions.length} divisions, ${totalPages} pages
+      </span>
+    `;
+  }
+
+  // Show division section
+  if (divisionSection) divisionSection.style.display = "block";
+}
 
 // Navigation logout button handler
 const navLogoutBtn = document.getElementById("navLogoutBtn");
@@ -146,11 +254,112 @@ function init() {
     newAnalysisBtn.addEventListener("click", startNewAnalysis);
   if (tryAgainBtn) tryAgainBtn.addEventListener("click", startNewAnalysis);
 
-  // Division selection
+  // Division selection - load section preview
   if (divisionSelect) {
-    divisionSelect.addEventListener("change", (e) => {
+    divisionSelect.addEventListener("change", async (e) => {
       selectedDivision = e.target.value;
+      if (selectedDivision && currentSpecId) {
+        await loadSectionPreview(selectedDivision);
+      } else {
+        hideSectionPreview();
+      }
     });
+  }
+
+  // Load previous analyses if job exists
+  if (jobId) {
+    loadPreviousAnalyses(jobId);
+  }
+}
+
+// Load section preview for selected division (free feature)
+async function loadSectionPreview(divisionCode) {
+  const previewDiv = document.getElementById("sectionPreview");
+  const previewTitle = document.getElementById("previewTitle");
+  const previewSections = document.getElementById("previewSections");
+
+  if (!previewDiv || !currentSpecId) return;
+
+  try {
+    // Query distinct sections with their starting page
+    const { data, error } = await supabase
+      .from("spec_pages")
+      .select("section_number, page_number")
+      .eq("spec_id", currentSpecId)
+      .eq("division_code", divisionCode)
+      .not("section_number", "is", null)
+      .order("page_number", { ascending: true });
+
+    if (error) throw error;
+
+    // Get unique sections with first page
+    const sectionMap = {};
+    for (const row of data) {
+      if (!sectionMap[row.section_number]) {
+        sectionMap[row.section_number] = row.page_number;
+      }
+    }
+
+    const sections = Object.entries(sectionMap)
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 10); // Limit to 10 sections in preview
+
+    if (sections.length === 0) {
+      previewTitle.textContent = `Division ${divisionCode} - ${getDivisionName(divisionCode)}`;
+      previewSections.innerHTML = "<li>No section details available</li>";
+    } else {
+      previewTitle.textContent = `Division ${divisionCode} - ${getDivisionName(divisionCode)} (${sections.length}${sections.length === 10 ? "+" : ""} sections)`;
+      previewSections.innerHTML = sections
+        .map(([section, page]) => `<li>${section} (page ${page})</li>`)
+        .join("");
+    }
+
+    previewDiv.style.display = "block";
+  } catch (err) {
+    console.error("[PREVIEW] Error loading section preview:", err);
+    hideSectionPreview();
+  }
+}
+
+function hideSectionPreview() {
+  const previewDiv = document.getElementById("sectionPreview");
+  if (previewDiv) previewDiv.style.display = "none";
+}
+
+// Load previous analyses for this job
+async function loadPreviousAnalyses(jobId) {
+  const analysesDiv = document.getElementById("previousAnalyses");
+  const analysesList = document.getElementById("analysesList");
+
+  if (!analysesDiv || !analysesList) return;
+
+  try {
+    const { data, error } = await supabase
+      .from("spec_analyses")
+      .select("id, division_code, created_at")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      analysesDiv.style.display = "none";
+      return;
+    }
+
+    analysesList.innerHTML = data
+      .map((a) => {
+        const date = new Date(a.created_at).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+        return `<li>Division ${a.division_code} - ${getDivisionName(a.division_code)} (${date})</li>`;
+      })
+      .join("");
+
+    analysesDiv.style.display = "block";
+  } catch (err) {
+    console.error("[ANALYSES] Error loading previous analyses:", err);
   }
 }
 

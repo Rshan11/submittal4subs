@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(supabase functions deploy:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npx vite:*)",
+      "Bash(supabase secrets set:*)",
+      "Bash(ls:*)",
+      "Bash(xargs:*)",
+      "Bash(cat:*)",
+      "Bash(python -m uvicorn:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

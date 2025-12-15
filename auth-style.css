@@ -1,12 +1,31 @@
+/* PM4Subs Auth Styles - Light Theme with Rivian Blue */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+:root {
+    --bg-base: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-elevated: #f1f5f9;
+    --border: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --accent-primary: #1A3C6E;
+    --accent-primary-hover: #0F2847;
+    --accent-primary-light: rgba(26, 60, 110, 0.1);
+    --accent-danger: #ef4444;
+    --accent-success: #22c55e;
+    --radius: 8px;
+}
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-base);
     min-height: 100vh;
     display: flex;
     align-items: center;
@@ -16,40 +35,42 @@ body {
 
 .auth-container {
     width: 100%;
-    max-width: 440px;
+    max-width: 400px;
 }
 
 .auth-card {
-    background: white;
-    border-radius: 16px;
-    padding: 40px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
 }
 
 .auth-header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 28px;
 }
 
 .brand {
-    font-size: 32px;
+    font-size: 26px;
     font-weight: 700;
-    color: #1a1a1a;
-    margin-bottom: 8px;
+    color: var(--accent-primary);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
 }
 
 .tagline {
-    color: #666;
-    font-size: 15px;
+    color: var(--text-secondary);
+    font-size: 14px;
 }
 
 .auth-tabs {
     display: flex;
-    gap: 8px;
+    gap: 4px;
     margin-bottom: 24px;
     padding: 4px;
-    background: #f5f5f5;
-    border-radius: 10px;
+    background: var(--bg-elevated);
+    border-radius: var(--radius);
 }
 
 .auth-tab {
@@ -57,42 +78,42 @@ body {
     padding: 10px;
     background: transparent;
     border: none;
-    border-radius: 8px;
-    font-size: 15px;
+    border-radius: 6px;
+    font-size: 14px;
     font-weight: 500;
-    color: #666;
+    color: var(--text-muted);
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .auth-tab.active {
-    background: white;
-    color: #1a1a1a;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .auth-tab:hover:not(.active) {
-    color: #1a1a1a;
+    color: var(--text-secondary);
 }
 
 .message-box {
-    padding: 12px 16px;
-    border-radius: 8px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
     margin-bottom: 20px;
     font-size: 14px;
     font-weight: 500;
 }
 
 .message-box.error {
-    background: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--accent-danger);
+    border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .message-box.success {
-    background: #dcfce7;
-    color: #166534;
-    border: 1px solid #bbf7d0;
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--accent-success);
+    border: 1px solid rgba(34, 197, 94, 0.2);
 }
 
 .auth-form {
@@ -111,45 +132,47 @@ body {
 }
 
 .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
 }
 
 .form-group label {
     display: block;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    color: #1a1a1a;
+    color: var(--text-secondary);
     margin-bottom: 6px;
 }
 
 .form-input {
     width: 100%;
-    padding: 12px 16px;
-    border: 2px solid #e5e5e5;
-    border-radius: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     font-size: 15px;
+    font-family: inherit;
     transition: all 0.2s;
-    background: white;
+    background: var(--bg-surface);
+    color: var(--text-primary);
 }
 
 .form-input:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-primary-light);
 }
 
 .form-input::placeholder {
-    color: #999;
+    color: var(--text-muted);
 }
 
 .btn-submit {
     width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 12px;
+    background: var(--accent-primary);
     color: white;
     border: none;
-    border-radius: 8px;
-    font-size: 16px;
+    border-radius: var(--radius);
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
@@ -157,8 +180,9 @@ body {
 }
 
 .btn-submit:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    background: var(--accent-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(26, 60, 110, 0.3);
 }
 
 .btn-submit:active {
@@ -166,18 +190,18 @@ body {
 }
 
 .btn-submit:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
     transform: none;
 }
 
 .form-footer {
-    margin-top: 20px;
+    margin-top: 18px;
     text-align: center;
 }
 
 .forgot-link {
-    color: #667eea;
+    color: var(--accent-primary);
     text-decoration: none;
     font-size: 14px;
     font-weight: 500;
@@ -185,24 +209,18 @@ body {
 }
 
 .forgot-link:hover {
-    color: #764ba2;
+    color: var(--accent-primary-hover);
 }
 
 .terms-text {
-    color: #666;
+    color: var(--text-muted);
     font-size: 13px;
     line-height: 1.5;
 }
 
+/* Hide beta badge */
 .beta-badge {
-    margin-top: 24px;
-    padding: 12px;
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-    color: #78350f;
-    text-align: center;
-    font-weight: 600;
-    border-radius: 8px;
-    font-size: 14px;
+    display: none;
 }
 
 /* Loading State */
@@ -233,10 +251,10 @@ body {
 /* Responsive */
 @media (max-width: 480px) {
     .auth-card {
-        padding: 32px 24px;
+        padding: 24px 20px;
     }
-    
+
     .brand {
-        font-size: 28px;
+        font-size: 24px;
     }
 }

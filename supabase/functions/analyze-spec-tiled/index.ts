@@ -24,44 +24,71 @@ const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const GEMINI_API_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 // Division keywords for different trades
-const DIVISION_PATTERNS: Record<string, { division: string; keywords: string[] }> = {
+const DIVISION_PATTERNS: Record<
+  string,
+  { division: string; keywords: string[] }
+> = {
   masonry: {
     division: "04",
-    keywords: ["DIVISION 04", "DIVISION 4", "04 ", "MASONRY", "UNIT MASONRY", "BRICK", "CMU", "CONCRETE MASONRY"]
+    keywords: [
+      "DIVISION 04",
+      "DIVISION 4",
+      "04 ",
+      "MASONRY",
+      "UNIT MASONRY",
+      "BRICK",
+      "CMU",
+      "CONCRETE MASONRY",
+    ],
   },
   concrete: {
     division: "03",
-    keywords: ["DIVISION 03", "DIVISION 3", "03 ", "CONCRETE", "CAST-IN-PLACE", "FORMWORK"]
+    keywords: [
+      "DIVISION 03",
+      "DIVISION 3",
+      "03 ",
+      "CONCRETE",
+      "CAST-IN-PLACE",
+      "FORMWORK",
+    ],
   },
   steel: {
     division: "05",
-    keywords: ["DIVISION 05", "DIVISION 5", "05 ", "STRUCTURAL STEEL", "METAL FABRICATIONS"]
+    keywords: [
+      "DIVISION 05",
+      "DIVISION 5",
+      "05 ",
+      "STRUCTURAL STEEL",
+      "METAL FABRICATIONS",
+    ],
   },
   electrical: {
     division: "26",
-    keywords: ["DIVISION 26", "26 ", "ELECTRICAL", "WIRING", "CONDUCTORS"]
+    keywords: ["DIVISION 26", "26 ", "ELECTRICAL", "WIRING", "CONDUCTORS"],
   },
   plumbing: {
     division: "22",
-    keywords: ["DIVISION 22", "22 ", "PLUMBING", "PIPING", "FIXTURES"]
+    keywords: ["DIVISION 22", "22 ", "PLUMBING", "PIPING", "FIXTURES"],
   },
   mechanical: {
     division: "23",
-    keywords: ["DIVISION 23", "23 ", "HVAC", "MECHANICAL", "DUCTWORK"]
-  }
+    keywords: ["DIVISION 23", "23 ", "HVAC", "MECHANICAL", "DUCTWORK"],
+  },
 };
 
-console.log("[BOOT] Tile-based Spec Analyzer v5.0 (Div 00-01 + OpenAI Summary)");
+console.log("[BOOT] Tile-based Spec Analyzer v5.1 (Parallel API calls)");
 console.log("[BOOT] GEMINI:", GEMINI_API_KEY ? "✓" : "✗");
 console.log("[BOOT] OPENAI:", OPENAI_API_KEY ? "✓" : "✗");
 
@@ -74,7 +101,16 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { tiles, div01Tiles, trade, jobId, projectName, totalPages, totalChars, preFiltered } = body;
+    const {
+      tiles,
+      div01Tiles,
+      trade,
+      jobId,
+      projectName,
+      totalPages,
+      totalChars,
+      preFiltered,
+    } = body;
 
     // Validate required fields
     if (!tiles || !Array.isArray(tiles) || tiles.length === 0) {
@@ -89,16 +125,23 @@ serve(async (req) => {
 
     const tradeConfig = DIVISION_PATTERNS[trade.toLowerCase()];
     if (!tradeConfig) {
-      return jsonResp({
-        error: `Unknown trade: ${trade}. Supported: ${Object.keys(DIVISION_PATTERNS).join(", ")}`
-      }, 400);
+      return jsonResp(
+        {
+          error: `Unknown trade: ${trade}. Supported: ${Object.keys(DIVISION_PATTERNS).join(", ")}`,
+        },
+        400,
+      );
     }
 
     console.log(`\n${"═".repeat(50)}`);
     console.log(`PROJECT: ${projectName || "Unnamed"}`);
     console.log(`TRADE: ${trade} (Division ${tradeConfig.division})`);
-    console.log(`TILES: ${tiles.length} (${totalChars?.toLocaleString() || "?"} chars from ${totalPages || "?"} pages)`);
-    console.log(`MODE: ${preFiltered ? "FAST (pre-filtered, skip scanning)" : "FULL (Gemini scanning)"}`);
+    console.log(
+      `TILES: ${tiles.length} (${totalChars?.toLocaleString() || "?"} chars from ${totalPages || "?"} pages)`,
+    );
+    console.log(
+      `MODE: ${preFiltered ? "FAST (pre-filtered, skip scanning)" : "FULL (Gemini scanning)"}`,
+    );
     console.log(`${"═".repeat(50)}\n`);
 
     let matchingTiles: MatchedTile[];
@@ -106,65 +149,105 @@ serve(async (req) => {
     // FAST MODE: Skip Gemini scanning if tiles are already pre-filtered by client
     // This reduces processing from ~3 minutes to ~20 seconds for large documents
     if (preFiltered) {
-      console.log(`[STEP 1] FAST MODE: Using all ${tiles.length} pre-filtered tiles (skipping Gemini scan)`);
-      matchingTiles = tiles.map(t => ({ ...t } as MatchedTile));
+      console.log(
+        `[STEP 1] FAST MODE: Using all ${tiles.length} pre-filtered tiles (skipping Gemini scan)`,
+      );
+      matchingTiles = tiles.map((t) => ({ ...t }) as MatchedTile);
       console.log(`[STEP 1] ✓ Using ${matchingTiles.length} tiles`);
     } else {
       // FULL MODE: Scan tiles for target division (parallel, batched)
-      console.log(`[STEP 1] Scanning ${tiles.length} tiles for Division ${tradeConfig.division}...`);
+      console.log(
+        `[STEP 1] Scanning ${tiles.length} tiles for Division ${tradeConfig.division}...`,
+      );
       matchingTiles = await scanTilesForDivision(tiles, tradeConfig, trade);
-      console.log(`[STEP 1] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`);
+      console.log(
+        `[STEP 1] ✓ Found ${matchingTiles.length} tiles containing Division ${tradeConfig.division}`,
+      );
     }
 
     if (matchingTiles.length === 0) {
-      return jsonResp({
-        success: false,
-        error: `No Division ${tradeConfig.division} (${trade}) content found in specification`,
-        metadata: {
-          tilesScanned: tiles.length,
-          totalPages: totalPages
-        }
-      }, 404);
+      return jsonResp(
+        {
+          success: false,
+          error: `No Division ${tradeConfig.division} (${trade}) content found in specification`,
+          metadata: {
+            tilesScanned: tiles.length,
+            totalPages: totalPages,
+          },
+        },
+        404,
+      );
     }
 
     // Step 2: Stitch matching tiles
     console.log("[STEP 2] Stitching matching tiles...");
     const divisionText = stitchTiles(matchingTiles);
-    console.log(`[STEP 2] ✓ Stitched ${divisionText.length.toLocaleString()} chars of Division ${tradeConfig.division} content`);
+    console.log(
+      `[STEP 2] ✓ Stitched ${divisionText.length.toLocaleString()} chars of Division ${tradeConfig.division} content`,
+    );
 
-    // Step 3: Final analysis with Gemini
-    console.log("[STEP 3] Analyzing division content with Gemini...");
-    const tradeAnalysis = await analyzeDivisionContent(divisionText, trade, tradeConfig.division, projectName);
-    console.log("[STEP 3] ✓ Trade analysis complete");
+    // Step 3 & 4: Run trade analysis and contract analysis IN PARALLEL
+    // This reduces total time from ~60s to ~30s, avoiding Edge Function timeout
+    console.log("[STEP 3-4] Starting parallel analysis...");
 
-    // Step 4: Analyze Division 00-01 for contract terms (if provided)
-    let contractAnalysis = null;
+    const analysisPromises: Promise<Record<string, unknown>>[] = [];
+
+    // Always analyze trade division
+    console.log("[STEP 3] Starting trade analysis with Gemini...");
+    analysisPromises.push(
+      analyzeDivisionContent(
+        divisionText,
+        trade,
+        tradeConfig.division,
+        projectName,
+      ),
+    );
+
+    // Prepare contract analysis if div01Tiles provided
+    let div01Text = "";
     if (div01Tiles && Array.isArray(div01Tiles) && div01Tiles.length > 0) {
-      console.log(`[STEP 4] Analyzing ${div01Tiles.length} Division 00-01 tiles for contract terms...`);
-      const div01Text = stitchTiles(div01Tiles as MatchedTile[]);
-      console.log(`[STEP 4] Stitched ${div01Text.length.toLocaleString()} chars of Div 00-01 content`);
-      contractAnalysis = await analyzeContractTerms(div01Text, projectName);
+      console.log(
+        `[STEP 4] Starting contract analysis (${div01Tiles.length} Div 00-01 tiles)...`,
+      );
+      div01Text = stitchTiles(div01Tiles as MatchedTile[]);
+      console.log(
+        `[STEP 4] Stitched ${div01Text.length.toLocaleString()} chars of Div 00-01 content`,
+      );
+      analysisPromises.push(analyzeContractTerms(div01Text, projectName));
+    }
+
+    // Wait for both analyses to complete in parallel
+    const results = await Promise.all(analysisPromises);
+    const tradeAnalysis = results[0];
+    const contractAnalysis = results.length > 1 ? results[1] : null;
+
+    console.log("[STEP 3] ✓ Trade analysis complete");
+    if (contractAnalysis) {
       console.log("[STEP 4] ✓ Contract analysis complete");
     }
 
     // Step 5: Final summary with OpenAI (combines trade + contract)
+    // Skip if timing is tight - this is optional
     let finalSummary = null;
-    if (OPENAI_API_KEY && contractAnalysis) {
+    const elapsedMs = Date.now() - startTime;
+    if (OPENAI_API_KEY && contractAnalysis && elapsedMs < 45000) {
       console.log("[STEP 5] Creating final summary with OpenAI...");
       finalSummary = await createFinalSummary(
         tradeAnalysis.summary as string,
         contractAnalysis.summary as string,
         trade,
-        projectName
+        projectName,
       );
       console.log("[STEP 5] ✓ Final summary complete");
+    } else if (elapsedMs >= 45000) {
+      console.log("[STEP 5] Skipping OpenAI summary - low on time");
     }
 
     // Combine all analysis results
     const analysis = {
       ...tradeAnalysis,
       contractTerms: contractAnalysis,
-      finalSummary: finalSummary
+      finalSummary: finalSummary,
     };
 
     // Step 6: Save results if jobId provided
@@ -175,7 +258,7 @@ serve(async (req) => {
         tilesScanned: tiles.length,
         tilesMatched: matchingTiles.length,
         totalPages: totalPages,
-        divisionChars: divisionText.length
+        divisionChars: divisionText.length,
       });
       console.log("[STEP 4] ✓ Results saved");
     }
@@ -197,17 +280,19 @@ serve(async (req) => {
         tilesMatched: matchingTiles.length,
         totalPages: totalPages,
         totalChars: totalChars,
-        divisionChars: divisionText.length
-      }
+        divisionChars: divisionText.length,
+      },
     });
-
   } catch (err) {
     console.error("[ERROR]", err);
-    return jsonResp({
-      success: false,
-      error: err instanceof Error ? err.message : "Internal error",
-      processingTimeMs: Date.now() - startTime
-    }, 500);
+    return jsonResp(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "Internal error",
+        processingTimeMs: Date.now() - startTime,
+      },
+      500,
+    );
   }
 });
 
@@ -231,9 +316,8 @@ interface MatchedTile extends Tile {
 async function scanTilesForDivision(
   tiles: Tile[],
   tradeConfig: { division: string; keywords: string[] },
-  trade: string
+  trade: string,
 ): Promise<MatchedTile[]> {
-
   const BATCH_SIZE = 2; // Process 2 tiles concurrently
   const BATCH_DELAY_MS = 10000; // Wait 10 seconds between batches (~12 req/min, under 15 limit)
   const matchingTiles: MatchedTile[] = [];
@@ -243,10 +327,12 @@ async function scanTilesForDivision(
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(tiles.length / BATCH_SIZE);
 
-    console.log(`[SCAN] Batch ${batchNum}/${totalBatches} (tiles ${i + 1}-${Math.min(i + BATCH_SIZE, tiles.length)})`);
+    console.log(
+      `[SCAN] Batch ${batchNum}/${totalBatches} (tiles ${i + 1}-${Math.min(i + BATCH_SIZE, tiles.length)})`,
+    );
 
     const batchResults = await Promise.all(
-      batch.map(tile => scanSingleTile(tile, tradeConfig, trade))
+      batch.map((tile) => scanSingleTile(tile, tradeConfig, trade)),
     );
 
     for (const result of batchResults) {
@@ -258,7 +344,7 @@ async function scanTilesForDivision(
     // Rate limit: wait between batches (except for the last one)
     if (i + BATCH_SIZE < tiles.length) {
       console.log(`[SCAN] Waiting ${BATCH_DELAY_MS / 1000}s for rate limit...`);
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+      await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
     }
   }
 
@@ -270,9 +356,8 @@ async function scanTilesForDivision(
 async function scanSingleTile(
   tile: Tile,
   tradeConfig: { division: string; keywords: string[] },
-  trade: string
+  trade: string,
 ): Promise<{ hasContent: boolean; tile: MatchedTile }> {
-
   const prompt = `You are scanning a construction specification document for Division ${tradeConfig.division} (${trade}) content.
 
 TILE TEXT (${tile.text.length} characters):
@@ -311,9 +396,9 @@ If no Division ${tradeConfig.division} content, return:
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 500
-        }
-      })
+          maxOutputTokens: 500,
+        },
+      }),
     });
 
     if (!response.ok) {
@@ -331,19 +416,20 @@ If no Division ${tradeConfig.division} content, return:
     const result = parseJSON(resultText);
 
     if (result.has_division_content && result.confidence !== "LOW") {
-      console.log(`[SCAN] ✓ Tile ${tile.index}: Found ${result.section_numbers_found?.join(", ") || "division content"}`);
+      console.log(
+        `[SCAN] ✓ Tile ${tile.index}: Found ${result.section_numbers_found?.join(", ") || "division content"}`,
+      );
       return {
         hasContent: true,
         tile: {
           ...tile,
           divisionStart: result.approximate_start_position,
-          divisionEnd: result.approximate_end_position
-        }
+          divisionEnd: result.approximate_end_position,
+        },
       };
     }
 
     return { hasContent: false, tile };
-
   } catch (err) {
     console.warn(`[SCAN] Tile ${tile.index} error:`, err);
     return { hasContent: false, tile };
@@ -390,107 +476,85 @@ async function analyzeDivisionContent(
   divisionText: string,
   trade: string,
   division: string,
-  projectName?: string
+  projectName?: string,
 ): Promise<Record<string, unknown>> {
-
   // Limit text size for final analysis
   const maxChars = 200000;
-  const textToAnalyze = divisionText.length > maxChars
-    ? divisionText.substring(0, maxChars) + "\n\n[TRUNCATED - additional content not shown]"
-    : divisionText;
+  const textToAnalyze =
+    divisionText.length > maxChars
+      ? divisionText.substring(0, maxChars) +
+        "\n\n[TRUNCATED - additional content not shown]"
+      : divisionText;
 
-  const tradeEmoji = trade === 'masonry' ? '🧱' : trade === 'concrete' ? '🏗️' : '🔧';
   const tradeName = trade.charAt(0).toUpperCase() + trade.slice(1);
 
-  const prompt = `You are a ${trade} contractor analyzing Division ${division} specifications. Create a CONDENSED, ACTIONABLE summary for bidding and field use.
+  const prompt = `Extract ${trade} specs for bidding. Be EXHAUSTIVE on products/manufacturers but CONCISE on format.
 
 PROJECT: ${projectName || "Construction Project"}
 
-SPECIFICATION TEXT:
+SPEC TEXT:
 ${textToAnalyze}
 
-Format your response EXACTLY like this example (use markdown):
+OUTPUT FORMAT:
 
-${tradeEmoji} ${tradeName} Division Summary (Condensed Contractor Format)
+## 🎯 CRITICAL BID ITEMS
 
-## 1. Materials
+**Basis of Design Products** (price these or submit substitution):
+| Product | Manufacturer | Model/Series | Or Equal? |
+|---------|--------------|--------------|-----------|
+(ONLY items with a named manufacturer. "Or Equal?" = Yes if spec allows substitutes, No if sole source)
 
-### Masonry Units
-- **Thin Brick** — ASTM C1088, Grade Exterior
-- Provide all special shapes (no mitered corners; no saw-cut exposed faces)
+**Color & Finish Selections**:
+- (Material): "(Color)" — Manufacturer: (name)
+(Example: CMU Split Face: "Burnt Orange" — Mutual Materials, Westblock)
 
-### Mortar
-- **Type M**, ASTM C270
-- Follow BIA Tech Notes #8
-- No cold-weather additives (no accelerators) allowed
+**Premium/Cost Adders**:
+- (Item): (what makes it premium)
 
-### Flashing
-**Metal Flashing Options:**
-- Stainless Steel (ASTM A240, Type 304, 0.016")
-- Copper (ASTM B370, 12–16 oz)
-- Galvanized Steel (ASTM A653, 24 ga)
+---
 
-**Flexible Flashings:**
-- Rubberized asphalt or elastomeric thermoplastic sheet
-- Thickness 0.025"–0.040"
+## 1. Primary Materials
+(Put the MAIN material for this trade FIRST: CMU for masonry, panels for electrical, pipe for plumbing)
 
-### Accessories
-- **Weepholes/Vents**: 3/8" × 1/2" × 4"
-- **Expansion Joints**: Neoprene filler (ASTM D1056), backer rod 25% wider than joint
-- **Weather Barriers**: Minimum 15# felt (ASTM D226)
+| Material | Manufacturer(s) | Standard | Size/Type | Color/Finish |
+|----------|-----------------|----------|-----------|--------------|
 
-## 2. Execution Requirements
+---
 
-### Cold Weather (Below 40°F)
-- Follow ACI 530.1 cold-weather procedures
-- No antifreeze/salts in mortar
-- Requires Purchaser approval
+## 2. Accessories & Components
 
-### Hot Weather (Above 100°F or 90°F with wind)
-- Follow ACI 530.1 hot-weather procedures
-- Wet surfaces before laying
-- Fog spray 3× daily for first 3 days
+| Item | Manufacturer | Spec | Size | Material |
+|------|--------------|------|------|----------|
 
-### Mortar Joints
-- **3/8" typical**
-- Full bed and head joints
-- Exposed: concave finish | Non-exposed: cut flush
+---
 
-### Quality Standards
-- Tolerances per ACI 530.1
-- Repoint all defective work
-- Protect adjacent materials from overspray
+## 3. Submittals Required
+- [ ] (type): (description)
 
-## 3. Related Divisions & Coordination
+---
 
-### Referenced Sections (items spec'd elsewhere)
-| Item | See Section | Who Provides | Who Installs |
-|------|-------------|--------------|--------------|
-| Through-wall flashing | 07 62 00 | Div 7 | Masonry |
-| Joint sealants | 07 92 00 | Div 7 | Div 7 |
-| Cavity insulation | 07 21 00 | Div 7 | Masonry |
-| Steel lintels | 05 50 00 | Div 5 | Masonry |
+## 4. Coordination
 
-### ⚠️ Scope Clarifications
-- **BY MASONRY**: List items explicitly assigned to this trade
-- **BY OTHERS**: List items to be provided/installed by other trades
-- **COORDINATE WITH**: List items requiring coordination (embedded items, openings, etc.)
+| Item | Section | Provides | Installs |
+|------|---------|----------|----------|
 
-### 💰 Cost Impact Items
-- Items that may affect your bid (special shapes, premium materials, sequencing requirements)
+---
+
+## 5. Execution
+
+**Testing/QC**: (requirements)
+**Environmental**: (temp limits, curing)
+**Prohibited**: (what's not allowed)
 
 ---
 
 RULES:
-1. Be CONCISE - use bullet points, not paragraphs
-2. BOLD the key specs (ASTM numbers, dimensions, types)
-3. Group related items under clear headers
-4. Include ALL ASTM/standard references found
-5. Note any special restrictions (no X allowed, requires approval, etc.)
-6. Skip sections if not found in the spec (don't make up content)
-7. Use em-dashes (—) to separate item names from specs
-8. CRITICAL: Extract ALL cross-references to other divisions (Section XX XX XX, Division X, etc.)
-9. Note WHO provides vs WHO installs for each referenced item`;
+1. "Basis of Design" = ONLY items with a NAMED manufacturer in the spec
+2. ALWAYS include manufacturer name with colors/finishes
+3. Each item appears ONCE in its best location
+4. Be EXHAUSTIVE extracting products — don't summarize, list each one
+5. Be CONCISE on formatting — bullets not paragraphs
+6. Skip empty sections`;
 
   const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
@@ -499,9 +563,9 @@ RULES:
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 16000
-      }
-    })
+        maxOutputTokens: 16000,
+      },
+    }),
   });
 
   if (!response.ok) {
@@ -521,7 +585,7 @@ RULES:
     summary: resultText,
     format: "markdown",
     trade: trade,
-    division: division
+    division: division,
   };
 }
 
@@ -531,14 +595,14 @@ RULES:
 
 async function analyzeContractTerms(
   div01Text: string,
-  projectName?: string
+  projectName?: string,
 ): Promise<Record<string, unknown>> {
-
   // Limit text size
   const maxChars = 150000;
-  const textToAnalyze = div01Text.length > maxChars
-    ? div01Text.substring(0, maxChars) + "\n\n[TRUNCATED]"
-    : div01Text;
+  const textToAnalyze =
+    div01Text.length > maxChars
+      ? div01Text.substring(0, maxChars) + "\n\n[TRUNCATED]"
+      : div01Text;
 
   const prompt = `You are a construction contract analyst reviewing Division 00 (Procurement) and Division 01 (General Requirements) specifications.
 
@@ -609,9 +673,9 @@ RULES:
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 8000
-      }
-    })
+        maxOutputTokens: 8000,
+      },
+    }),
   });
 
   if (!response.ok) {
@@ -625,7 +689,7 @@ RULES:
 
   return {
     summary: resultText || "No contract terms found",
-    format: "markdown"
+    format: "markdown",
   };
 }
 
@@ -637,68 +701,59 @@ async function createFinalSummary(
   tradeSummary: string,
   contractSummary: string,
   trade: string,
-  projectName?: string
+  projectName?: string,
 ): Promise<string> {
+  const prompt = `Create ${trade} bid summary for ${projectName || "project"}.
 
-  const prompt = `You are creating an EXECUTIVE SUMMARY for a ${trade} contractor bidding on ${projectName || "a construction project"}.
-
-Combine and synthesize these two analysis sections into ONE cohesive bid summary:
-
-=== TRADE REQUIREMENTS (Division ${trade}) ===
+=== TRADE SPECS ===
 ${tradeSummary}
 
-=== CONTRACT TERMS (Division 00-01) ===
+=== CONTRACT TERMS ===
 ${contractSummary}
 
-Create a final EXECUTIVE BID SUMMARY with these sections:
+OUTPUT:
 
 ## 🎯 Executive Bid Summary
 
-### Critical Bid Items
-- Top 5-7 items that MUST be included in the bid
-- Key materials with specific specs
-- Major scope items
+### 💰 Pricing Impact
+(3-5 bullets. INCLUDE manufacturer names. Example: "CMU — Mutual Materials/Westblock basis of design, Burnt Orange split face — verify pricing")
 
-### ⚠️ Risk & Cost Alerts
-- Items that could impact pricing
-- Unusual requirements
-- Potential exclusions to consider
+### ⚠️ Risks
+(2-3 bullets: unusual requirements, tight timelines, scope gaps)
 
-### 📋 Pre-Bid Checklist
-- [ ] Key submittals required
-- [ ] Bonds/insurance needed
-- [ ] Background checks required
-- [ ] Special certifications needed
+### ✅ Pre-Bid Actions
+- [ ] Quotes needed: (list suppliers BY NAME)
+- [ ] RFIs: (clarification topics)
+- [ ] Coordinate: (other trades)
 
-### 💡 Bid Strategy Notes
-- Suggested clarifications
-- Items to verify
-- Coordination concerns
+### 📝 Bid Notes
+(1-2 sentences of strategy)
 
-Keep it CONCISE and ACTIONABLE. This is a quick-reference for bid day.`;
+BE BRIEF. Don't repeat detailed specs — summarize what matters for bid day.`;
 
   try {
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: "You are a construction bidding expert creating concise, actionable bid summaries for contractors."
+            content:
+              "You are a construction bidding expert creating concise, actionable bid summaries for contractors.",
           },
           {
             role: "user",
-            content: prompt
-          }
+            content: prompt,
+          },
         ],
         temperature: 0.3,
-        max_tokens: 2000
-      })
+        max_tokens: 2000,
+      }),
     });
 
     if (!response.ok) {
@@ -709,7 +764,6 @@ Keep it CONCISE and ACTIONABLE. This is a quick-reference for bid day.`;
 
     const data = await response.json();
     return data.choices?.[0]?.message?.content || "No summary generated";
-
   } catch (err) {
     console.error("[OPENAI] Exception:", err);
     return "Executive summary generation failed";
@@ -724,7 +778,7 @@ async function saveResults(
   supabase: ReturnType<typeof createClient>,
   jobId: string,
   analysis: Record<string, unknown>,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): Promise<void> {
   const { error } = await supabase
     .from("jobs")
@@ -732,7 +786,7 @@ async function saveResults(
       status: "completed",
       result: analysis,
       metadata: metadata,
-      completed_at: new Date().toISOString()
+      completed_at: new Date().toISOString(),
     })
     .eq("id", jobId);
 
@@ -775,6 +829,6 @@ function parseJSON(text: string): Record<string, unknown> {
 function jsonResp(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" }
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
