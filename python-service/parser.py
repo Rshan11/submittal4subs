@@ -319,24 +319,25 @@ def validate_toc_map(toc_map: dict, total_pages: int) -> dict:
     if not toc_map:
         return {}
 
-    page_numbers = list(toc_map.values())
-    max_page = max(page_numbers)
+    page_numbers = sorted(toc_map.values())
 
-    # All page numbers under 10 = probably TOC page order, not real pages
-    if max_page < 10:
-        print(f"[PARSE] TOC page numbers too low (max={max_page}), skipping TOC")
-        return {}
-
-    # Should span reasonable portion of document (at least 10%)
-    if max_page < total_pages * 0.1:
+    # CRITICAL: If page numbers are just 1, 2, 3, 4, 5... it's TOC page order, not real pages
+    if page_numbers == list(range(1, len(page_numbers) + 1)):
         print(
-            f"[PARSE] TOC doesn't span document (max={max_page}, total={total_pages}), skipping"
+            f"[PARSE] TOC pages are sequential from 1 - this is TOC page order, not real page numbers"
         )
         return {}
 
-    # Need enough mappings to be useful (at least 3 sections)
-    if len(toc_map) < 3:
-        print(f"[PARSE] TOC only mapped {len(toc_map)} sections, skipping")
+    max_page = max(page_numbers)
+
+    # If max page number is less than 10, definitely wrong
+    if max_page < 10:
+        print(f"[PARSE] TOC max page {max_page} too low, rejecting")
+        return {}
+
+    # If we don't span at least 20% of the document, probably wrong
+    if max_page < total_pages * 0.2:
+        print(f"[PARSE] TOC doesn't span document ({max_page} vs {total_pages} pages)")
         return {}
 
     return toc_map
