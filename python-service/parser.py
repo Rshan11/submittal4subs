@@ -66,19 +66,17 @@ def clean_text(text: str) -> str:
 def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]:
     """
     Detect if a page contains a division/section header.
-    Handles many format variations found in real specs including:
+    STRICT matching - only match actual headers, not random mentions.
 
-    MasterFormat patterns:
-    - SECTION 04 22 00, SECTION 04 22 00.13, SECTION042200
-    - 04 20 00, 04 22 00.13, 042200, 04-22-00
-    - Section 042200 - UNIT MASONRY
+    Valid patterns (must be at start of line or clearly a header):
+    - SECTION 04 22 00 - UNIT MASONRY (header with title)
+    - SECTION 042200.13 (compact with decimal)
+    - DIVISION 04 - MASONRY
 
-    Division patterns:
-    - DIVISION 04, DIVISION 4, DIV 04, DIV. 4
-    - DIVISION 04 - MASONRY, DIVISION FOUR
-
-    Keyword fallbacks (when no number found):
-    - MASONRY, CONCRETE, METALS, WOOD, THERMAL, OPENINGS, FINISHES
+    NOT valid (random mentions in body text):
+    - "see Section 04 22 00" (cross-reference in sentence)
+    - "per Division 01" (reference in paragraph)
+    - page numbers, dates containing division digits
     """
     if not text:
         return None
@@ -87,23 +85,20 @@ def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]
     if not validate_division_context(text):
         return None
 
-    text_upper = text.upper()
+    # Focus on the first 800 chars - headers are at the top of the page
+    header_area = text[:800]
 
-    # PATTERN GROUP 1: MasterFormat section numbers (most reliable)
-    # Matches: 04 22 00, 04-22-00, 042200, 04 22 00.13, etc.
-    section_patterns = [
-        # SECTION keyword + 6 digits (with spaces, dashes, or compact)
-        r"SECTION\s*(\d{2})[\s\-\.]*(\d{2})[\s\-\.]*(\d{2})(?:[\.\-]\d+)?",
-        # 6 digits with various separators at line start
-        r"^[\s]*(\d{2})[\s\-\.]+(\d{2})[\s\-\.]+(\d{2})(?:[\.\-]\d+)?",
-        # 6 digits followed by dash/space and title text
-        r"(\d{2})[\s\-\.]+(\d{2})[\s\-\.]+(\d{2})(?:[\.\-]\d+)?\s*[-–—:]\s*[A-Z]",
-        # Compact 6-digit format
-        r"\b(\d{2})(\d{2})(\d{2})(?:\.\d+)?\s*[-–—:]?\s*[A-Z]",
+    # PATTERN GROUP 1: SECTION header with title (most reliable)
+    # Must have SECTION keyword + 6-digit code + dash + TITLE
+    section_with_title = [
+        # SECTION at/near line start + digits + dash + title (all caps or title case)
+        r"^\s*SECTION\s+(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z\s]+",
+        # SECTION anywhere + digits + dash + multi-word title
+        r"SECTION\s+(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z]+\s+[A-Z]",
     ]
 
-    for pattern in section_patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+    for pattern in section_with_title:
+        match = re.search(pattern, header_area, re.IGNORECASE | re.MULTILINE)
         if match:
             div_code = match.group(1)
             section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
@@ -114,119 +109,53 @@ def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]
                 "start_page": page_num,
             }
 
-    # PATTERN GROUP 2: DIVISION keyword patterns
-    div_patterns = [
-        r"DIVISION\s*(\d{1,2})",  # DIVISION 04, DIVISION 4
-        r"DIV\.?\s*(\d{1,2})",  # DIV 04, DIV. 4
-        r"DIVISION\s+([A-Z]+)",  # DIVISION FOUR (word form)
-    ]
+    # PATTERN GROUP 2: Standalone section number at line start with title
+    # Like: "04 22 00 - UNIT MASONRY" or "04 22 00.13 - CONCRETE UNIT VENEER"
+    standalone_with_title = r"^\s*(\d{2})[\s\.\-]+(\d{2})[\s\.\-]+(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z\s]+"
+    match = re.search(standalone_with_title, header_area, re.MULTILINE)
+    if match:
+        div_code = match.group(1)
+        section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+        return {
+            "division_code": div_code,
+            "section_number": section_number,
+            "section_title": None,
+            "start_page": page_num,
+        }
 
-    # Word to number mapping
-    word_to_num = {
-        "ONE": "01",
-        "TWO": "02",
-        "THREE": "03",
-        "FOUR": "04",
-        "FIVE": "05",
-        "SIX": "06",
-        "SEVEN": "07",
-        "EIGHT": "08",
-        "NINE": "09",
-        "TEN": "10",
-        "ELEVEN": "11",
-        "TWELVE": "12",
-        "THIRTEEN": "13",
-        "FOURTEEN": "14",
-        "FIFTEEN": "15",
-        "SIXTEEN": "16",
-        "SEVENTEEN": "17",
-        "EIGHTEEN": "18",
-        "NINETEEN": "19",
-        "TWENTY": "20",
-    }
+    # PATTERN GROUP 3: DIVISION header at line start
+    # Must be standalone header format, not mid-sentence reference
+    div_header = r"^\s*DIVISION\s+(\d{1,2})\s*[-–—:]\s*[A-Z]"
+    match = re.search(div_header, header_area, re.IGNORECASE | re.MULTILINE)
+    if match:
+        div_code = match.group(1).zfill(2)
+        return {
+            "division_code": div_code,
+            "section_number": None,
+            "section_title": None,
+            "start_page": page_num,
+        }
 
-    for pattern in div_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+    # PATTERN GROUP 4: Footer format + PART 1 GENERAL confirmation
+    # Some specs have section number in footer: "04 22 00.13 - 1"
+    # Only trust this if the page also has "PART 1" and "GENERAL" (section start indicators)
+    text_upper = text.upper()
+    if "PART 1" in text_upper and "GENERAL" in text_upper:
+        # Look for section number pattern anywhere on page
+        # But require it to look like a header/footer (with page number suffix or title)
+        footer_pattern = r"(\d{2})[\s\.\-]+(\d{2})[\s\.\-]+(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*(?:\d+|[A-Z][A-Z]+)"
+        match = re.search(footer_pattern, text)
         if match:
-            val = match.group(1).upper()
-            if val.isdigit():
-                div_code = val.zfill(2)
-            elif val in word_to_num:
-                div_code = word_to_num[val]
-            else:
-                continue
-            return {
-                "division_code": div_code,
-                "section_number": None,
-                "section_title": None,
-                "start_page": page_num,
-            }
-
-    # PATTERN GROUP 3: Keyword-based detection (fallback)
-    # Only use if strong keywords appear prominently (near top of page)
-    first_500 = text_upper[:500]
-
-    keyword_divisions = {
-        "02": ["EXISTING CONDITIONS", "SITE CONSTRUCTION", "DEMOLITION"],
-        "03": ["CONCRETE", "CAST-IN-PLACE", "PRECAST"],
-        "04": [
-            "MASONRY",
-            "UNIT MASONRY",
-            "CMU",
-            "BRICK",
-            "STONE VENEER",
-            "CONCRETE UNIT",
-        ],
-        "05": ["METALS", "STRUCTURAL STEEL", "METAL FABRICATIONS", "STEEL DECK"],
-        "06": ["WOOD", "ROUGH CARPENTRY", "FINISH CARPENTRY", "ARCHITECTURAL WOODWORK"],
-        "07": [
-            "THERMAL",
-            "MOISTURE",
-            "WATERPROOFING",
-            "INSULATION",
-            "ROOFING",
-            "FIREPROOFING",
-            "SEALANTS",
-        ],
-        "08": ["OPENINGS", "DOORS", "WINDOWS", "GLAZING", "HARDWARE"],
-        "09": [
-            "FINISHES",
-            "DRYWALL",
-            "GYPSUM",
-            "TILE",
-            "FLOORING",
-            "PAINTING",
-            "ACOUSTICAL",
-        ],
-        "10": ["SPECIALTIES", "SIGNAGE", "TOILET ACCESSORIES", "LOCKERS"],
-        "11": ["EQUIPMENT", "FOOD SERVICE", "RESIDENTIAL EQUIPMENT"],
-        "12": ["FURNISHINGS", "FURNITURE", "WINDOW TREATMENTS"],
-        "13": ["SPECIAL CONSTRUCTION", "SWIMMING POOL", "CLEAN ROOM"],
-        "14": ["CONVEYING", "ELEVATORS", "ESCALATORS"],
-        "21": ["FIRE SUPPRESSION", "SPRINKLER"],
-        "22": ["PLUMBING", "DOMESTIC WATER", "SANITARY"],
-        "23": ["HVAC", "HEATING", "VENTILATING", "AIR CONDITIONING", "DUCTWORK"],
-        "26": ["ELECTRICAL", "POWER DISTRIBUTION", "LIGHTING"],
-        "27": ["COMMUNICATIONS", "DATA", "VOICE"],
-        "28": ["ELECTRONIC SAFETY", "FIRE ALARM", "ACCESS CONTROL"],
-        "31": ["EARTHWORK", "SITE CLEARING", "GRADING", "EXCAVATION"],
-        "32": ["EXTERIOR IMPROVEMENTS", "PAVING", "LANDSCAPING"],
-        "33": ["UTILITIES", "STORM DRAINAGE", "SANITARY SEWER"],
-    }
-
-    for div_code, keywords in keyword_divisions.items():
-        for keyword in keywords:
-            # Must be prominent - appear in header area and be a clear title
-            if keyword in first_500:
-                # Extra validation: should look like a section header, not just a mention
-                # Check for PART 1, GENERAL, or all-caps format nearby
-                if "PART 1" in text_upper or "GENERAL" in first_500:
-                    return {
-                        "division_code": div_code,
-                        "section_number": None,
-                        "section_title": keyword,
-                        "start_page": page_num,
-                    }
+            div_code = match.group(1)
+            # Validate it's a reasonable division code (00-49 for now)
+            if int(div_code) <= 49:
+                section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+                return {
+                    "division_code": div_code,
+                    "section_number": section_number,
+                    "section_title": None,
+                    "start_page": page_num,
+                }
 
     return None
 
