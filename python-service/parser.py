@@ -65,97 +65,66 @@ def clean_text(text: str) -> str:
 
 def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]:
     """
-    Detect if a page contains a division/section header.
-    STRICT matching - only match actual headers, not random mentions.
+    Detect if this is the FIRST PAGE of a new section.
 
-    Valid patterns (must be at start of line or clearly a header):
-    - SECTION 04 22 00 - UNIT MASONRY (header with title)
-    - SECTION 042200.13 (compact with decimal)
-    - DIVISION 04 - MASONRY
+    VERY STRICT - requires BOTH:
+    1. Section header in first 300 chars: "SECTION 04 22 00 - TITLE"
+    2. "PART 1" somewhere on page (confirms it's page 1 of section)
 
-    NOT valid (random mentions in body text):
-    - "see Section 04 22 00" (cross-reference in sentence)
-    - "per Division 01" (reference in paragraph)
-    - page numbers, dates containing division digits
+    This prevents matching:
+    - Cross-references like "see Section 04 22 00"
+    - Pages 2+ of a section (no PART 1)
+    - Random mentions of section numbers
     """
     if not text:
         return None
 
-    # Only process if this looks like a section start page
-    if not validate_division_context(text):
+    text_upper = text.upper()
+
+    # REQUIRED: Must have "PART 1" - this is the definitive marker of section start
+    # Every CSI spec section starts with PART 1 - GENERAL
+    if "PART 1" not in text_upper:
         return None
 
-    # Focus on the first 800 chars - headers are at the top of the page
-    header_area = text[:800]
+    # Look for section header in FIRST 300 chars only (true header location)
+    first_300 = text[:300]
 
-    # PATTERN GROUP 1: SECTION header with title (most reliable)
-    # Must have SECTION keyword + 6-digit code + dash + TITLE
-    section_with_title = [
-        # SECTION at/near line start + digits + dash + title (all caps or title case)
-        r"^\s*SECTION\s+(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z\s]+",
-        # SECTION anywhere + digits + dash + multi-word title
-        r"SECTION\s+(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z]+\s+[A-Z]",
-    ]
+    # Pattern: "SECTION XX XX XX - TITLE" or "SECTION XX XX XX.XX - TITLE"
+    # Title must be at least 4 chars of uppercase letters
+    section_match = re.search(
+        r"SECTION\s+(\d{2})[\s\.\-]*(\d{2})[\s\.\-]*(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*([A-Z][A-Z\s]{3,})",
+        first_300,
+        re.IGNORECASE,
+    )
 
-    for pattern in section_with_title:
-        match = re.search(pattern, header_area, re.IGNORECASE | re.MULTILINE)
-        if match:
-            div_code = match.group(1)
-            section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-            return {
-                "division_code": div_code,
-                "section_number": section_number,
-                "section_title": None,
-                "start_page": page_num,
-            }
-
-    # PATTERN GROUP 2: Standalone section number at line start with title
-    # Like: "04 22 00 - UNIT MASONRY" or "04 22 00.13 - CONCRETE UNIT VENEER"
-    standalone_with_title = r"^\s*(\d{2})[\s\.\-]+(\d{2})[\s\.\-]+(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*[A-Z][A-Z\s]+"
-    match = re.search(standalone_with_title, header_area, re.MULTILINE)
-    if match:
-        div_code = match.group(1)
-        section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+    if section_match:
+        div_code = section_match.group(1)
+        section_number = f"{section_match.group(1)} {section_match.group(2)} {section_match.group(3)}"
+        section_title = section_match.group(4).strip()
         return {
             "division_code": div_code,
             "section_number": section_number,
-            "section_title": None,
+            "section_title": section_title,
             "start_page": page_num,
         }
 
-    # PATTERN GROUP 3: DIVISION header at line start
-    # Must be standalone header format, not mid-sentence reference
-    div_header = r"^\s*DIVISION\s+(\d{1,2})\s*[-–—:]\s*[A-Z]"
-    match = re.search(div_header, header_area, re.IGNORECASE | re.MULTILINE)
-    if match:
-        div_code = match.group(1).zfill(2)
+    # Alternative: "XX XX XX - TITLE" without SECTION keyword (some specs)
+    standalone_match = re.search(
+        r"^[\s]*(\d{2})[\s\.\-]+(\d{2})[\s\.\-]+(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*([A-Z][A-Z\s]{3,})",
+        first_300,
+        re.MULTILINE,
+    )
+
+    if standalone_match:
+        div_code = standalone_match.group(1)
+        section_number = f"{standalone_match.group(1)} {standalone_match.group(2)} {standalone_match.group(3)}"
+        section_title = standalone_match.group(4).strip()
         return {
             "division_code": div_code,
-            "section_number": None,
-            "section_title": None,
+            "section_number": section_number,
+            "section_title": section_title,
             "start_page": page_num,
         }
-
-    # PATTERN GROUP 4: Footer format + PART 1 GENERAL confirmation
-    # Some specs have section number in footer: "04 22 00.13 - 1"
-    # Only trust this if the page also has "PART 1" and "GENERAL" (section start indicators)
-    text_upper = text.upper()
-    if "PART 1" in text_upper and "GENERAL" in text_upper:
-        # Look for section number pattern anywhere on page
-        # But require it to look like a header/footer (with page number suffix or title)
-        footer_pattern = r"(\d{2})[\s\.\-]+(\d{2})[\s\.\-]+(\d{2})(?:[\.\-]\d+)?\s*[-–—]\s*(?:\d+|[A-Z][A-Z]+)"
-        match = re.search(footer_pattern, text)
-        if match:
-            div_code = match.group(1)
-            # Validate it's a reasonable division code (00-49 for now)
-            if int(div_code) <= 49:
-                section_number = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-                return {
-                    "division_code": div_code,
-                    "section_number": section_number,
-                    "section_title": None,
-                    "start_page": page_num,
-                }
 
     return None
 
