@@ -1,8 +1,12 @@
 """
 AI Analysis - Gemini + OpenAI Two-Stage Pipeline
+
+Stage 1 (Gemini): Extract ALL product data with CRITICAL BID ITEMS first
+Stage 2 (OpenAI): Create SHORT executive summary focused on action items
+
+The key insight: Gemini extracts everything, OpenAI summarizes what to DO.
 """
 
-import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -20,44 +24,68 @@ TRADE_CONFIGS = {
     "masonry": {
         "division": "04",
         "name": "Masonry",
-        "emoji": "🧱",
         "keywords": ["MASONRY", "BRICK", "CMU", "MORTAR", "GROUT", "UNIT MASONRY"],
     },
     "concrete": {
         "division": "03",
         "name": "Concrete",
-        "emoji": "🏗️",
         "keywords": ["CONCRETE", "CAST-IN-PLACE", "FORMWORK", "REINFORCEMENT"],
     },
     "steel": {
         "division": "05",
         "name": "Structural Steel",
-        "emoji": "🔩",
         "keywords": ["STRUCTURAL STEEL", "METAL FABRICATIONS", "STEEL JOISTS"],
+    },
+    "wood": {
+        "division": "06",
+        "name": "Wood/Plastics/Composites",
+        "keywords": ["ROUGH CARPENTRY", "FINISH CARPENTRY", "MILLWORK", "LUMBER"],
+    },
+    "thermal": {
+        "division": "07",
+        "name": "Thermal & Moisture Protection",
+        "keywords": ["WATERPROOFING", "INSULATION", "ROOFING", "SEALANTS", "FLASHING"],
+    },
+    "openings": {
+        "division": "08",
+        "name": "Openings",
+        "keywords": ["DOORS", "WINDOWS", "HARDWARE", "GLAZING", "FRAMES"],
+    },
+    "finishes": {
+        "division": "09",
+        "name": "Finishes",
+        "keywords": ["DRYWALL", "GYPSUM", "PAINTING", "FLOORING", "TILE", "CEILING"],
     },
     "electrical": {
         "division": "26",
         "name": "Electrical",
-        "emoji": "⚡",
         "keywords": ["ELECTRICAL", "WIRING", "CONDUCTORS", "PANELBOARDS"],
     },
     "plumbing": {
         "division": "22",
         "name": "Plumbing",
-        "emoji": "🔧",
         "keywords": ["PLUMBING", "PIPING", "FIXTURES", "PUMPS"],
     },
     "mechanical": {
         "division": "23",
         "name": "Mechanical/HVAC",
-        "emoji": "❄️",
         "keywords": ["HVAC", "MECHANICAL", "DUCTWORK", "AIR HANDLING"],
+    },
+    "sitework": {
+        "division": "31",
+        "name": "Earthwork",
+        "keywords": ["EARTHWORK", "GRADING", "EXCAVATION", "SITE"],
+    },
+    "general": {
+        "division": "XX",
+        "name": "General",
+        "keywords": [],
     },
 }
 
 
 # ═══════════════════════════════════════════════════════════════
-# GEMINI ANALYSIS
+# GEMINI ANALYSIS - Stage 1
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -65,14 +93,13 @@ async def analyze_division_with_gemini(
     division_text: str, trade: str, project_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Stage 1: Gemini extracts product specs with CRITICAL BID ITEMS first
-    Universal prompt works for any division - highlights pricing-critical items
+    Stage 1: Gemini extracts ALL product data with CRITICAL ITEMS first.
+    Universal prompt works for any division.
     """
-    config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS["masonry"])
-    trade_name = config["name"]
-    division = config["division"]
+    config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS.get("general", {}))
+    trade_name = config.get("name", trade.title())
+    division = config.get("division", "XX")
 
-    # Limit text size
     max_chars = 200000
     text_to_analyze = division_text[:max_chars]
     if len(division_text) > max_chars:
@@ -90,12 +117,12 @@ SPECIFICATION TEXT:
 OUTPUT FORMAT - Follow this EXACT structure:
 =======================================================================
 
-## 🎯 CRITICAL BID ITEMS (Read This First)
+## CRITICAL BID ITEMS (Read This First)
 
-Identify and list the items that MOST AFFECT BID PRICING. These are:
+Identify and list the items that MOST AFFECT BID PRICING:
 
 ### Specified Products (Basis of Design)
-List ANY item where a specific manufacturer/product is named (not "or equal"):
+List ANY item where a specific manufacturer/product is named:
 - [Product] - [Manufacturer] - [Model/Series if given]
 
 ### Color & Finish Selections
@@ -177,15 +204,16 @@ For EACH material, list ALL specified properties:
 ---
 
 CRITICAL RULES:
-1. The "CRITICAL BID ITEMS" section is MOST IMPORTANT - this is what contractors read first
+1. The "CRITICAL BID ITEMS" section is MOST IMPORTANT - contractors read this first
 2. If a specific manufacturer is named, it's critical - note if "or equal" is allowed
-3. ANY color, finish, or texture specification is critical - contractors must price exactly what's specified
+3. ANY color, finish, or texture specification is critical
 4. Stainless steel, special coatings, seismic requirements = premium cost items
 5. DO NOT SUMMARIZE - list every specific product/material
 6. Include COMPLETE specification references (full ASTM with type/grade)
-7. Leave sections empty if not found - don't make things up"""
+7. Leave sections empty if not found - don't make things up
+8. DO NOT repeat content - if you've listed something once, don't list it again"""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
             json={
@@ -207,15 +235,33 @@ CRITICAL RULES:
             .get("text", "")
         )
 
-        if not result_text:
-            raise Exception("No response from Gemini")
+        # Validate output - check for repetition loops
+        if result_text:
+            lines = result_text.split("\n")
+            if len(lines) > 50:
+                # Check for repetition
+                seen = set()
+                unique_lines = []
+                for line in lines:
+                    line_stripped = line.strip()
+                    if line_stripped and len(line_stripped) > 20:
+                        if line_stripped in seen:
+                            continue  # Skip duplicate
+                        seen.add(line_stripped)
+                    unique_lines.append(line)
+                result_text = "\n".join(unique_lines)
 
         return {
-            "summary": result_text,
+            "summary": result_text or "No extraction results",
             "format": "markdown",
             "trade": trade,
             "division": division,
         }
+
+
+# ═══════════════════════════════════════════════════════════════
+# CONTRACT TERMS ANALYSIS
+# ═══════════════════════════════════════════════════════════════
 
 
 async def analyze_contract_terms(
@@ -318,7 +364,7 @@ RULES:
 
 
 # ═══════════════════════════════════════════════════════════════
-# OPENAI FINAL SUMMARY
+# OPENAI EXECUTIVE SUMMARY - Stage 2
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -329,84 +375,88 @@ async def create_executive_summary(
     project_name: Optional[str] = None,
 ) -> str:
     """
-    Stage 2: OpenAI creates executive bid summary
-    Focuses on strategy since Gemini already extracted the details
+    Stage 2: OpenAI creates SHORT executive bid summary.
+    Focuses on strategy since Gemini already extracted details.
     """
     if not OPENAI_API_KEY:
         return "OpenAI API key not configured - skipping executive summary"
 
-    config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS["masonry"])
+    config = TRADE_CONFIGS.get(trade.lower(), {})
+    trade_name = config.get("name", trade.title())
 
-    # Truncate to avoid token limits
-    trade_excerpt = trade_summary[:15000] if trade_summary else ""
-    contract_excerpt = contract_summary[:8000] if contract_summary else ""
+    # Truncate inputs to avoid token limits
+    trade_summary_truncated = trade_summary[:15000] if trade_summary else ""
+    contract_summary_truncated = contract_summary[:8000] if contract_summary else ""
 
-    prompt = f"""You are a {trade} estimator reviewing extracted spec data for {project_name or "a construction project"}.
+    prompt = f"""You are a {trade_name} estimator reviewing extracted spec data for {project_name or "a construction project"}.
 
-The detailed extraction is already done. Your job is to create a SHORT executive summary that highlights what matters for bidding.
+The detailed extraction is already done. Your job is to create a SHORT executive summary.
 
-=== EXTRACTED SPEC DATA (Division {config["division"]}) ===
-{trade_excerpt}
+=== EXTRACTED SPEC DATA ===
+{trade_summary_truncated}
 
 === CONTRACT TERMS ===
-{contract_excerpt}
+{contract_summary_truncated}
 
 === YOUR TASK ===
 
-Create a BRIEF executive summary (not a re-extraction). Focus on:
+Create a BRIEF executive summary with these sections:
 
 ## Executive Bid Summary
 
-### 💰 Pricing Impact Items
+### Pricing Impact Items
 - List 3-5 items that MOST affect your bid price
 - Note if items are premium (stainless, special colors, basis of design)
 - Flag anything that needs supplier quotes
 
-### ⚠️ Risk Alerts
+### Risk Alerts
 - Unusual requirements that could cause problems
-- Tight timelines or penalties from contract terms
+- Tight timelines or penalties
 - Scope gaps or ambiguities to clarify
 
-### ✅ Pre-Bid Actions
-- [ ] Quotes needed from: (list suppliers)
-- [ ] Clarifications to request: (list RFI topics)
-- [ ] Coordination meetings: (list trades)
+### Pre-Bid Actions
+- [ ] Quotes needed from: (list specific suppliers)
+- [ ] Clarifications to request: (list specific RFI topics)
+- [ ] Coordination meetings: (list specific trades)
 
-### 📝 Bid Notes
-- 2-3 sentences of strategy advice for this bid
+### Bid Notes
+- 2-3 sentences of strategy advice for this specific bid
 
-KEEP IT SHORT. The detailed specs are already extracted above - don't repeat them. Focus on what the estimator needs to DO before bid day."""
+KEEP IT SHORT AND ACTIONABLE. The detailed specs are already extracted - don't repeat them. Focus on what the estimator needs to DO before bid day."""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            OPENAI_API_URL,
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a construction bidding expert creating concise, actionable bid summaries for contractors.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            },
-        )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                OPENAI_API_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a construction bidding expert. Create concise, actionable bid summaries. Be specific - name actual products and suppliers from the spec data.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 1500,
+                },
+            )
 
-        if response.status_code != 200:
-            return "Executive summary generation failed"
+            if response.status_code != 200:
+                return f"Executive summary generation failed: {response.status_code}"
 
-        data = response.json()
-        return (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "No summary generated")
-        )
+            data = response.json()
+            return (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "No summary generated")
+            )
+    except Exception as e:
+        return f"Executive summary error: {str(e)}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -476,10 +526,15 @@ async def run_full_analysis(
     }
 
 
+# ═══════════════════════════════════════════════════════════════
+# LEGACY UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+
 def stitch_tiles(tiles: List[Dict[str, Any]], overlap: int = 500) -> str:
     """
-    Stitch tiles back together, handling overlaps.
-    Tiles should be sorted by tile_index.
+    Legacy function: Stitch tiles back together, handling overlaps.
+    Kept for backward compatibility with tile-based code.
     """
     if not tiles:
         return ""

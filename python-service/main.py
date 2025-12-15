@@ -4,12 +4,19 @@ Deployed on Render at submittal4subs.onrender.com
 
 Endpoints:
 - POST /upload - Upload PDF, store in R2, create spec record
-- POST /parse/{spec_id} - Parse PDF into divisions and tiles
+- POST /parse/{spec_id} - Parse PDF into pages with section tags
 - POST /analyze/{spec_id} - Run AI analysis on a division
+- GET /spec/{spec_id}/divisions - Get divisions found in a spec
+
+Architecture: Page-Level Tagging
+- Each page is individually tagged with its section number
+- No range calculation, no merging, no end-page detection
+- Query by division_code for accurate results
 """
 
 import asyncio
 import os
+import sys
 from typing import Optional
 from uuid import uuid4
 
@@ -41,18 +48,18 @@ if not os.getenv("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = get_env("OPENAI_API_KEY")
 
 # Import our modules
-from analyzer import TRADE_CONFIGS, run_full_analysis, stitch_tiles
+from analyzer import TRADE_CONFIGS, run_full_analysis
 from db import (
     create_spec,
     delete_divisions,
+    delete_pages,
     delete_tiles,
-    get_divisions,
+    get_division_summary,
+    get_pages_by_division,
+    get_pages_by_section,
     get_spec,
-    get_tiles_by_division,
-    get_tiles_by_sections,
     insert_analysis,
-    insert_division,
-    insert_tiles_batch,
+    insert_pages_batch,
     update_spec_status,
 )
 from parser import parse_spec
@@ -64,8 +71,8 @@ from storage import download_pdf, upload_pdf
 
 app = FastAPI(
     title="Spec Analyzer API",
-    description="PDF spec parsing and AI analysis service",
-    version="2.0.0",
+    description="PDF spec parsing and AI analysis service (Page-Level Architecture)",
+    version="3.0.0",
 )
 
 # CORS - allow all origins
@@ -77,7 +84,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("[BOOT] Spec Analyzer Service v2.0")
+print("[BOOT] Spec Analyzer Service v3.0 (Page-Level Architecture)")
 print(f"[BOOT] SUPABASE_URL: {'OK' if os.getenv('SUPABASE_URL') else 'MISSING'}")
 print(
     f"[BOOT] SUPABASE_SERVICE_KEY: {'OK' if os.getenv('SUPABASE_SERVICE_KEY') else 'MISSING'}"
@@ -104,7 +111,6 @@ class ParseResponse(BaseModel):
     status: str
     page_count: int
     division_count: int
-    tile_count: int
     divisions: list
 
 
@@ -117,6 +123,8 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     spec_id: str
     division: str
+    pages_analyzed: int
+    cross_refs_included: int
     analysis: dict
     processing_time_ms: int
 
@@ -130,7 +138,8 @@ class AnalyzeResponse(BaseModel):
 async def health_check():
     return {
         "status": "healthy",
-        "version": "2.0.0",
+        "version": "3.0.0",
+        "architecture": "page-level",
         "services": {
             "supabase": bool(os.getenv("SUPABASE_URL")),
             "r2": bool(os.getenv("R2_ACCOUNT_ID")),
@@ -206,20 +215,17 @@ async def upload_spec(
 @app.post("/parse/{spec_id}", response_model=ParseResponse)
 async def parse_spec_endpoint(spec_id: str):
     """
-    Parse a PDF specification into divisions and tiles.
+    Parse a PDF specification into pages with section tags.
 
-    - Fetches PDF from R2
-    - Scans all pages for division headers
-    - Creates spec_divisions records
-    - Chunks text into ~4000 char tiles
-    - Detects cross-references
-    - Creates spec_tiles records
-    - Updates specs.status = 'ready'
+    Page-Level Architecture:
+    - Each page is individually tagged with its section number
+    - Section number detected from page header/footer
+    - No range calculation or merging
+    - Query by division_code for accurate division content
     """
-    import sys
-
     print(f"\n{'=' * 50}", flush=True)
     print(f"[PARSE] Parsing spec: {spec_id}", flush=True)
+    print(f"[PARSE] Architecture: Page-Level Tagging", flush=True)
     print(f"{'=' * 50}\n", flush=True)
     sys.stdout.flush()
 
@@ -243,61 +249,60 @@ async def parse_spec_endpoint(spec_id: str):
         pdf_bytes = download_pdf(spec["r2_key"])
         print(f"[PARSE] Downloaded {len(pdf_bytes):,} bytes", flush=True)
 
-        # Clear existing divisions and tiles (for re-parsing)
-        print("[PARSE] Clearing existing divisions/tiles...")
-        delete_divisions(spec_id)
-        delete_tiles(spec_id)
+        # Clear existing data (for re-parsing)
+        print("[PARSE] Clearing existing pages/divisions/tiles...")
+        delete_pages(spec_id)
+        delete_divisions(spec_id)  # Legacy cleanup
+        delete_tiles(spec_id)  # Legacy cleanup
 
-        # Parse the PDF
-        print("[PARSE] Scanning for divisions...")
+        # Parse the PDF with page-level tagging
+        print("[PARSE] Parsing pages with section detection...")
         result = parse_spec(pdf_bytes, spec_id)
 
-        print(f"[PARSE] Found {result['division_count']} divisions")
-        print(f"[PARSE] Generated {result['tile_count']} tiles")
+        print(f"[PARSE] Found {len(result['divisions'])} divisions")
+        print(f"[PARSE] Processed {len(result['pages'])} pages with content")
 
-        # Insert divisions
-        for div in result["divisions"]:
-            insert_division(
-                spec_id=spec_id,
-                division_code=div["division_code"],
-                section_number=div.get("section_number"),
-                section_title=div.get("section_title"),
-                start_page=div["start_page"],
-                end_page=div["end_page"],
-            )
-            print(
-                f"[PARSE]   Division {div['division_code']}: pages {div['start_page']}-{div['end_page']}"
-            )
-
-        # Insert tiles in batches
-        if result["tiles"]:
-            print(f"[PARSE] Inserting {len(result['tiles'])} tiles...")
-            # Batch insert (Supabase handles large batches)
-            insert_tiles_batch(result["tiles"])
+        # Insert pages in batches
+        if result["pages"]:
+            print(f"[PARSE] Inserting {len(result['pages'])} pages...")
+            insert_pages_batch(result["pages"])
 
         # Update spec status
         update_spec_status(spec_id, "ready", result["page_count"])
 
+        # Build division list for response
+        division_list = []
+        for div_code in sorted(result["division_summary"].keys()):
+            info = result["division_summary"][div_code]
+            pages = info["pages"]
+            division_list.append(
+                {
+                    "code": div_code,
+                    "page_count": info["count"],
+                    "sections": info["sections"],
+                    "page_range": f"{min(pages)}-{max(pages)}" if pages else None,
+                }
+            )
+
         print(f"\n[PARSE] Complete!")
+        for div in division_list:
+            print(
+                f"[PARSE]   Division {div['code']}: {div['page_count']} pages ({div['page_range']})"
+            )
 
         return ParseResponse(
             spec_id=spec_id,
             status="ready",
             page_count=result["page_count"],
-            division_count=result["division_count"],
-            tile_count=result["tile_count"],
-            divisions=[
-                {
-                    "code": d["division_code"],
-                    "title": d.get("section_title"),
-                    "pages": f"{d['start_page']}-{d['end_page']}",
-                }
-                for d in result["divisions"]
-            ],
+            division_count=len(result["divisions"]),
+            divisions=division_list,
         )
 
     except Exception as e:
         print(f"[PARSE] ERROR: {e}")
+        import traceback
+
+        traceback.print_exc()
         update_spec_status(spec_id, "failed")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -312,12 +317,11 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
     """
     Run AI analysis on a specific division.
 
-    - Fetches tiles for the requested division
-    - Collects cross-references from tiles
-    - Fetches tiles for referenced sections
-    - Sends to Gemini for extraction
-    - Sends to ChatGPT for executive summary
-    - Stores result in spec_analyses
+    Page-Level Architecture:
+    - Fetches all pages tagged with the requested division_code
+    - Collects cross-references from those pages
+    - Fetches cross-referenced pages (limited to top 10 sections)
+    - Runs Gemini extraction + OpenAI summary
     """
     division = request.division.zfill(2)  # Ensure 2-digit format
 
@@ -351,48 +355,60 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
     print(f"[ANALYZE] Trade: {trade}")
 
     try:
-        # Get tiles for requested division
-        print(f"[ANALYZE] Fetching tiles for Division {division}...")
-        division_tiles = get_tiles_by_division(spec_id, division)
+        # Get pages for requested division
+        print(f"[ANALYZE] Fetching pages for Division {division}...")
+        division_pages = get_pages_by_division(spec_id, division)
 
-        if not division_tiles:
+        if not division_pages:
             raise HTTPException(
-                status_code=404, detail=f"No tiles found for Division {division}"
+                status_code=404, detail=f"No pages found for Division {division}"
             )
 
-        print(f"[ANALYZE] Found {len(division_tiles)} tiles")
+        print(f"[ANALYZE] Found {len(division_pages)} pages")
 
-        # Collect cross-references
+        # Collect cross-references from those pages
         all_cross_refs = set()
-        for tile in division_tiles:
-            refs = tile.get("cross_refs") or []
+        for page in division_pages:
+            refs = page.get("cross_refs") or []
             all_cross_refs.update(refs)
 
-        print(f"[ANALYZE] Found {len(all_cross_refs)} cross-references")
+        # Filter to external refs only (not same division)
+        external_refs = [r for r in all_cross_refs if not r.startswith(division)]
+        print(f"[ANALYZE] Found {len(external_refs)} cross-referenced sections")
 
-        # Get tiles for cross-referenced sections
-        if all_cross_refs:
-            cross_ref_tiles = get_tiles_by_sections(spec_id, list(all_cross_refs))
-            print(f"[ANALYZE] Fetched {len(cross_ref_tiles)} cross-ref tiles")
-        else:
-            cross_ref_tiles = []
+        # Fetch cross-referenced pages (limit to top 10 to avoid token explosion)
+        cross_ref_pages = []
+        for ref in sorted(external_refs)[:10]:
+            ref_pages = get_pages_by_section(spec_id, ref)
+            cross_ref_pages.extend(ref_pages)
 
-        # Stitch division tiles together
-        division_text = stitch_tiles(division_tiles)
+        if cross_ref_pages:
+            print(f"[ANALYZE] Fetched {len(cross_ref_pages)} cross-ref pages")
+
+        # Build division text from pages
+        division_text = "\n\n".join(
+            [
+                f"--- Page {p['page_number']} (Section {p['section_number'] or 'unknown'}) ---\n{p['content']}"
+                for p in sorted(division_pages, key=lambda x: x["page_number"])
+            ]
+        )
         print(f"[ANALYZE] Division text: {len(division_text):,} chars")
 
-        # Get Division 00/01 tiles for contract terms
+        # Get Division 00/01 for contract terms
         div01_text = None
         if request.include_contract_terms:
-            div00_tiles = get_tiles_by_division(spec_id, "00")
-            div01_tiles = get_tiles_by_division(spec_id, "01")
-            all_contract_tiles = div00_tiles + div01_tiles
+            div00_pages = get_pages_by_division(spec_id, "00")
+            div01_pages = get_pages_by_division(spec_id, "01")
+            contract_pages = div00_pages + div01_pages
 
-            if all_contract_tiles:
-                div01_text = stitch_tiles(
-                    sorted(all_contract_tiles, key=lambda x: x.get("tile_index", 0))
+            if contract_pages:
+                div01_text = "\n\n".join(
+                    [
+                        f"--- Page {p['page_number']} ---\n{p['content']}"
+                        for p in sorted(contract_pages, key=lambda x: x["page_number"])
+                    ]
                 )
-                print(f"[ANALYZE] Contract terms text: {len(div01_text):,} chars")
+                print(f"[ANALYZE] Contract text: {len(div01_text):,} chars")
 
         # Run AI analysis
         print("[ANALYZE] Running AI analysis...")
@@ -419,6 +435,8 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
         return AnalyzeResponse(
             spec_id=spec_id,
             division=division,
+            pages_analyzed=len(division_pages),
+            cross_refs_included=len(cross_ref_pages),
             analysis=analysis_result,
             processing_time_ms=analysis_result["processing_time_ms"],
         )
@@ -427,6 +445,9 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
         raise
     except Exception as e:
         print(f"[ANALYZE] ERROR: {e}")
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -437,36 +458,29 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
 
 @app.get("/spec/{spec_id}/divisions")
 async def get_spec_divisions(spec_id: str):
-    """Get all divisions found in a spec"""
+    """Get all divisions found in a spec using page-level data"""
     spec = get_spec(spec_id)
     if not spec:
         raise HTTPException(status_code=404, detail="Spec not found")
 
-    divisions = get_divisions(spec_id)
+    # Get division summary from spec_pages
+    divisions = get_division_summary(spec_id)
 
     return {
         "spec_id": spec_id,
         "status": spec["status"],
         "page_count": spec.get("page_count"),
+        "architecture": "page-level",
         "divisions": [
             {
                 "code": d["division_code"],
-                "section_number": d.get("section_number"),
-                "title": d.get("section_title"),
-                "start_page": d["start_page"],
-                "end_page": d["end_page"],
+                "page_count": d["page_count"],
+                "sections": d.get("sections", []),
+                "page_range": d.get("page_range"),
             }
             for d in divisions
         ],
     }
-
-
-# ═══════════════════════════════════════════════════════════════
-# RUN SERVER
-# ═══════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    import uvicorn
 
 
 # ═══════════════════════════════════════════════════════════════
