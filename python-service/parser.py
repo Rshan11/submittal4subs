@@ -73,6 +73,13 @@ def clean_text(text: str) -> str:
     """Remove problematic Unicode characters that cause encoding issues"""
     if not text:
         return ""
+
+    # Remove null bytes first - PostgreSQL can't handle these
+    # Common in scanned/OCR'd PDFs
+    text = text.replace("\x00", "")
+    text = text.replace("\u0000", "")
+
+    # Remove other problematic characters
     problematic = [
         "\u200b",  # zero-width space
         "\u200c",  # zero-width non-joiner
