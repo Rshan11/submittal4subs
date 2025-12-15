@@ -8,13 +8,13 @@ Endpoints:
 - POST /analyze/{spec_id} - Run AI analysis on a division
 """
 
-import os
 import asyncio
+import os
 from typing import Optional
 from uuid import uuid4
-from dotenv import load_dotenv
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -41,22 +41,22 @@ if not os.getenv("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = get_env("OPENAI_API_KEY")
 
 # Import our modules
-from storage import upload_pdf, download_pdf
+from analyzer import TRADE_CONFIGS, run_full_analysis, stitch_tiles
 from db import (
     create_spec,
-    get_spec,
-    update_spec_status,
-    insert_division,
     delete_divisions,
-    get_divisions,
-    insert_tiles_batch,
     delete_tiles,
+    get_divisions,
+    get_spec,
     get_tiles_by_division,
     get_tiles_by_sections,
     insert_analysis,
+    insert_division,
+    insert_tiles_batch,
+    update_spec_status,
 )
 from parser import parse_spec
-from analyzer import run_full_analysis, stitch_tiles, TRADE_CONFIGS
+from storage import download_pdf, upload_pdf
 
 # ═══════════════════════════════════════════════════════════════
 # APP SETUP
@@ -216,26 +216,32 @@ async def parse_spec_endpoint(spec_id: str):
     - Creates spec_tiles records
     - Updates specs.status = 'ready'
     """
-    print(f"\n{'=' * 50}")
-    print(f"[PARSE] Parsing spec: {spec_id}")
-    print(f"{'=' * 50}\n")
+    import sys
+
+    print(f"\n{'=' * 50}", flush=True)
+    print(f"[PARSE] Parsing spec: {spec_id}", flush=True)
+    print(f"{'=' * 50}\n", flush=True)
+    sys.stdout.flush()
 
     # Get spec record
     spec = get_spec(spec_id)
     if not spec:
         raise HTTPException(status_code=404, detail="Spec not found")
 
-    print(f"[PARSE] Found spec: {spec['original_name']}")
-    print(f"[PARSE] R2 key: {spec['r2_key']}")
+    print(f"[PARSE] Found spec: {spec['original_name']}", flush=True)
+    print(f"[PARSE] R2 key: {spec['r2_key']}", flush=True)
+    sys.stdout.flush()
 
     try:
         # Update status to processing
         update_spec_status(spec_id, "processing")
+        print("[PARSE] Status updated to processing", flush=True)
 
         # Download PDF from R2
-        print("[PARSE] Downloading PDF from R2...")
+        print("[PARSE] Downloading PDF from R2...", flush=True)
+        sys.stdout.flush()
         pdf_bytes = download_pdf(spec["r2_key"])
-        print(f"[PARSE] Downloaded {len(pdf_bytes):,} bytes")
+        print(f"[PARSE] Downloaded {len(pdf_bytes):,} bytes", flush=True)
 
         # Clear existing divisions and tiles (for re-parsing)
         print("[PARSE] Clearing existing divisions/tiles...")
@@ -469,5 +475,6 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
