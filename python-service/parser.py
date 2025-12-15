@@ -320,15 +320,20 @@ def validate_toc_map(toc_map: dict, total_pages: int) -> dict:
         return {}
 
     page_numbers = sorted(toc_map.values())
+    max_page = max(page_numbers)
+    min_page = min(page_numbers)
 
-    # CRITICAL: If page numbers are just 1, 2, 3, 4, 5... it's TOC page order, not real pages
-    if page_numbers == list(range(1, len(page_numbers) + 1)):
+    print(
+        f"[PARSE] TOC validation: {len(toc_map)} sections, pages {min_page}-{max_page}, total_pages={total_pages}"
+    )
+
+    # CRITICAL: If all page numbers are small (under 20) and start from 1-ish,
+    # it's TOC page order, not real page numbers
+    if max_page <= 20 and min_page <= 2:
         print(
-            f"[PARSE] TOC pages are sequential from 1 - this is TOC page order, not real page numbers"
+            f"[PARSE] TOC pages look like TOC order (1-{max_page}), not real page numbers - rejecting"
         )
         return {}
-
-    max_page = max(page_numbers)
 
     # If max page number is less than 10, definitely wrong
     if max_page < 10:
