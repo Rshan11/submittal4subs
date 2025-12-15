@@ -711,15 +711,34 @@ ${tradeSummary}
 === CONTRACT TERMS ===
 ${contractSummary}
 
+## CRITICAL FORMATTING RULES:
+
+### Use EXACT Names - No Generic Descriptions
+- Colors: Use the EXACT color name from the spec (e.g., "Burnt Orange", "Desert Tan", "Charcoal Gray")
+- Do NOT use generic terms like "Integral Colored" or "As selected by Architect" if a specific color is named
+- Textures: Always include (e.g., "Split Face", "Ground Face", "Smooth", "Scored")
+- Format as: "Split Face CMU, Burnt Orange" not "Integral Colored Concrete Masonry"
+
+### No Duplicates
+- Each manufacturer/product appears ONCE per section
+- Combine related items (e.g., list all CMU colors together, not separately)
+
+### Color & Finish Format
+- [Product Type]: [Texture], [Color]
+- Example: "Concrete Masonry Units: Split Face, Burnt Orange"
+- Example: "Mortar: Standard Gray"
+
 OUTPUT:
 
 ## 🎯 Executive Bid Summary
 
 ### 💰 Pricing Impact
-(3-5 bullets. INCLUDE manufacturer names. Example: "CMU — Mutual Materials/Westblock basis of design, Burnt Orange split face — verify pricing")
+(5-7 bullets max. Use EXACT product names/colors from spec)
+Format: "[Product]: [Manufacturer] - [Model/Color] ([Basis of Design if applicable])"
+Example: "Split Face CMU: Mutual Materials - Burnt Orange (Basis of Design)"
 
 ### ⚠️ Risks
-(2-3 bullets: unusual requirements, tight timelines, scope gaps)
+(3-5 bullets: unusual requirements, tight timelines, scope gaps)
 
 ### ✅ Pre-Bid Actions
 - [ ] Quotes needed: (list suppliers BY NAME)
@@ -729,7 +748,7 @@ OUTPUT:
 ### 📝 Bid Notes
 (1-2 sentences of strategy)
 
-BE BRIEF. Don't repeat detailed specs — summarize what matters for bid day.`;
+BE BRIEF. Use exact colors/finishes from spec. No duplicates.`;
 
   try {
     const response = await fetch(OPENAI_API_URL, {
