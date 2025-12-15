@@ -65,11 +65,10 @@ async def analyze_division_with_gemini(
     division_text: str, trade: str, project_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Stage 1: Gemini exhaustively extracts ALL product data from specification
-    Universal prompt works for any division - pulls everything verbatim
+    Stage 1: Gemini extracts product specs with CRITICAL BID ITEMS first
+    Universal prompt works for any division - highlights pricing-critical items
     """
     config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS["masonry"])
-    trade_emoji = config["emoji"]
     trade_name = config["name"]
     division = config["division"]
 
@@ -79,99 +78,111 @@ async def analyze_division_with_gemini(
     if len(division_text) > max_chars:
         text_to_analyze += "\n\n[TRUNCATED - additional content not shown]"
 
-    prompt = f"""You are extracting COMPLETE product specifications from a construction spec document. DO NOT SUMMARIZE. List EVERY specific product mentioned with FULL details.
+    prompt = f"""You are extracting product specifications from a construction spec document for a contractor preparing a bid.
 
 PROJECT: {project_name or "Construction Project"}
+DIVISION: {division} - {trade_name}
 
 SPECIFICATION TEXT:
 {text_to_analyze}
 
----
+=======================================================================
+OUTPUT FORMAT - Follow this EXACT structure:
+=======================================================================
 
-Extract ALL of the following. Be EXHAUSTIVE - miss nothing:
+## 🎯 CRITICAL BID ITEMS (Read This First)
+
+Identify and list the items that MOST AFFECT BID PRICING. These are:
+
+### Specified Products (Basis of Design)
+List ANY item where a specific manufacturer/product is named (not "or equal"):
+- [Product] - [Manufacturer] - [Model/Series if given]
+
+### Color & Finish Selections
+List ALL items with specified colors, textures, or finishes:
+- [Item]: [Color/Finish] - [Manufacturer if specified]
+
+### Premium/Unusual Requirements
+List items that are MORE EXPENSIVE than standard:
+- Stainless steel instead of galvanized
+- Special coatings or treatments
+- Higher grades than typical (e.g., Type 304 SS vs standard)
+- Seismic or special structural requirements
+
+### Quantity-Sensitive Items
+List items where the spec defines specific sizes, gauges, or quantities:
+- [Item]: [Size/Gauge/Specification]
+
+---
 
 ## 1. Manufacturers & Products
 
-List EVERY manufacturer and product mentioned:
-| Manufacturer | Product Name/Series | Model/Part Number | Notes |
-|--------------|---------------------|-------------------|-------|
-| (list all) | | | |
+| Manufacturer | Product | Model/Part # | Basis of Design? | Or Equal? |
+|--------------|---------|--------------|------------------|-----------|
+| (list all)   |         |              | Yes/No           | Yes/No    |
 
-If "or equal" or "approved equal" is specified, note it. If basis of design, note it.
+---
 
-## 2. Standards & References
+## 2. Material Specifications
 
-List EVERY ASTM, ANSI, ACI, AWS, or other standard reference with COMPLETE designation:
-| Standard | Full Designation | Type/Grade/Class | Application |
-|----------|------------------|------------------|-------------|
-| ASTM C90 | Standard Specification for Loadbearing Concrete Masonry Units | Type I, Normal Weight | CMU |
-| (list all) | | | |
-
-Include the COMPLETE reference (e.g., "ASTM A615/A615M, Grade 60" not just "ASTM A615")
-
-## 3. Material Specifications
-
-For EACH material specified, capture ALL properties:
+For EACH material, list ALL specified properties:
 
 ### [Material Name]
-- **Type/Grade**:
+- **Manufacturer**: (if specified)
+- **Standard**: ASTM/ANSI reference with Type/Grade/Class
 - **Size/Dimensions**:
 - **Weight/Gauge/Thickness**:
-- **Finish/Coating**:
-- **Color**:
-- **Fire Rating**:
-- **Performance Requirements**:
-- **ASTM/Standard**:
+- **Color/Finish**:
+- **Special Requirements**: (seismic, fire rating, etc.)
 
-(Repeat for every material - include ALL that are specified)
+---
 
-## 4. Accessories & Components
+## 3. Accessories & Components
 
-List EVERY accessory, anchor, fastener, reinforcement, etc.:
-| Item | Specification | Size/Type | Material | Standard |
-|------|---------------|-----------|----------|----------|
-| (list all) | | | | |
+| Item | Specification | Size | Material | Coating/Finish |
+|------|---------------|------|----------|----------------|
+| (list all anchors, ties, fasteners, supports, etc.) |
 
-## 5. Submittals Required
+---
 
-List every submittal explicitly required:
-- [ ] Product Data for: (list items)
-- [ ] Shop Drawings for: (list items)
-- [ ] Samples for: (list items, include size if specified)
-- [ ] Certificates for: (list items)
-- [ ] Test Reports for: (list items)
-- [ ] Warranties for: (list items)
+## 4. Submittals Required
 
-## 6. Coordination With Other Trades
+- [ ] Product Data: (list items)
+- [ ] Shop Drawings: (list items)
+- [ ] Samples: (list items WITH sizes if specified)
+- [ ] Certificates: (list items)
+- [ ] Test Reports: (list items)
 
-| Item | Referenced Section | Provided By | Installed By |
-|------|-------------------|-------------|--------------|
-| (list all cross-references) | | | |
+---
 
-## 7. Execution Requirements
+## 5. Coordination With Other Trades
+
+| Item | Section | Provided By | Installed By |
+|------|---------|-------------|--------------|
+| (list all cross-references) |
+
+---
+
+## 6. Execution Requirements
 
 ### Quality/Testing
-- List specific tests required
-- Tolerances specified
-- Inspection requirements
+- (list specific tests, inspections, tolerances)
 
 ### Environmental Limits
-- Temperature limits (hot/cold weather)
-- Humidity/moisture requirements
-- Curing requirements
+- (temperature, humidity, curing requirements)
 
 ### Prohibited Items
-- List anything explicitly NOT allowed
+- (list anything explicitly NOT allowed)
 
 ---
 
 CRITICAL RULES:
-1. DO NOT SUMMARIZE - list every item verbatim
-2. Include COMPLETE specification references (full ASTM designation with type/grade)
-3. Capture ALL dimensions, weights, gauges, ratings
-4. Note manufacturer preferences (basis of design, or equal, no substitution)
-5. If a property is specified, include it - don't skip details
-6. Use tables for easy scanning
+1. The "CRITICAL BID ITEMS" section is MOST IMPORTANT - this is what contractors read first
+2. If a specific manufacturer is named, it's critical - note if "or equal" is allowed
+3. ANY color, finish, or texture specification is critical - contractors must price exactly what's specified
+4. Stainless steel, special coatings, seismic requirements = premium cost items
+5. DO NOT SUMMARIZE - list every specific product/material
+6. Include COMPLETE specification references (full ASTM with type/grade)
 7. Leave sections empty if not found - don't make things up"""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -319,49 +330,52 @@ async def create_executive_summary(
 ) -> str:
     """
     Stage 2: OpenAI creates executive bid summary
-    Combines trade analysis + contract terms
+    Focuses on strategy since Gemini already extracted the details
     """
     if not OPENAI_API_KEY:
         return "OpenAI API key not configured - skipping executive summary"
 
     config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS["masonry"])
 
-    prompt = f"""You are creating an EXECUTIVE SUMMARY for a {trade} contractor bidding on {project_name or "a construction project"}.
+    # Truncate to avoid token limits
+    trade_excerpt = trade_summary[:15000] if trade_summary else ""
+    contract_excerpt = contract_summary[:8000] if contract_summary else ""
 
-Combine and synthesize these two analysis sections into ONE cohesive bid summary:
+    prompt = f"""You are a {trade} estimator reviewing extracted spec data for {project_name or "a construction project"}.
 
-=== TRADE REQUIREMENTS (Division {config["division"]}) ===
-{trade_summary}
+The detailed extraction is already done. Your job is to create a SHORT executive summary that highlights what matters for bidding.
 
-=== CONTRACT TERMS (Division 00-01) ===
-{contract_summary}
+=== EXTRACTED SPEC DATA (Division {config["division"]}) ===
+{trade_excerpt}
 
-Create a final EXECUTIVE BID SUMMARY with these sections:
+=== CONTRACT TERMS ===
+{contract_excerpt}
+
+=== YOUR TASK ===
+
+Create a BRIEF executive summary (not a re-extraction). Focus on:
 
 ## Executive Bid Summary
 
-### Critical Bid Items
-- Top 5-7 items that MUST be included in the bid
-- Key materials with specific specs
-- Major scope items
+### 💰 Pricing Impact Items
+- List 3-5 items that MOST affect your bid price
+- Note if items are premium (stainless, special colors, basis of design)
+- Flag anything that needs supplier quotes
 
-### Risk & Cost Alerts
-- Items that could impact pricing
-- Unusual requirements
-- Potential exclusions to consider
+### ⚠️ Risk Alerts
+- Unusual requirements that could cause problems
+- Tight timelines or penalties from contract terms
+- Scope gaps or ambiguities to clarify
 
-### Pre-Bid Checklist
-- [ ] Key submittals required
-- [ ] Bonds/insurance needed
-- [ ] Background checks required
-- [ ] Special certifications needed
+### ✅ Pre-Bid Actions
+- [ ] Quotes needed from: (list suppliers)
+- [ ] Clarifications to request: (list RFI topics)
+- [ ] Coordination meetings: (list trades)
 
-### Bid Strategy Notes
-- Suggested clarifications
-- Items to verify
-- Coordination concerns
+### 📝 Bid Notes
+- 2-3 sentences of strategy advice for this bid
 
-Keep it CONCISE and ACTIONABLE. This is a quick-reference for bid day."""
+KEEP IT SHORT. The detailed specs are already extracted above - don't repeat them. Focus on what the estimator needs to DO before bid day."""
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
