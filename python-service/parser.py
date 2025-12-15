@@ -273,6 +273,75 @@ def find_index_pages(pages: List[dict]) -> List[int]:
     return index_pages
 
 
+def is_toc_page(text: str) -> bool:
+    """
+    Detect TOC/index pages to skip during footer detection.
+
+    These pages should be tagged as Division 00 (Procurement/General)
+    rather than incorrectly classified based on section numbers listed.
+    """
+    text_upper = text.upper()
+
+    # Explicit TOC headers
+    if "TABLE OF CONTENTS" in text_upper:
+        return True
+    if "INDEX OF SPECIFICATIONS" in text_upper:
+        return True
+    if "SPECIFICATION INDEX" in text_upper:
+        return True
+
+    # Multiple "Section XX XX XX" listings on same page = TOC page
+    # This catches TOC pages without explicit headers
+    section_listings = re.findall(
+        r"Section\s+\d{2}\s+\d{2}\s+\d{2}", text, re.IGNORECASE
+    )
+    if len(section_listings) > 3:
+        return True
+
+    # Many section numbers on a page (more than 5) = likely TOC/index
+    section_pattern = re.compile(r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b")
+    section_matches = section_pattern.findall(text)
+    if len(section_matches) > 8:
+        return True
+
+    return False
+
+
+def validate_toc_map(toc_map: dict, total_pages: int) -> dict:
+    """
+    Reject TOC mappings that aren't real page numbers.
+
+    Some specs have TOC entries without real page numbers - they show
+    TOC page order (1, 2, 3, 4, 5) instead of actual document pages.
+    This causes false classifications where TOC pages get assigned
+    to sections instead of falling through to footer detection.
+    """
+    if not toc_map:
+        return {}
+
+    page_numbers = list(toc_map.values())
+    max_page = max(page_numbers)
+
+    # All page numbers under 10 = probably TOC page order, not real pages
+    if max_page < 10:
+        print(f"[PARSE] TOC page numbers too low (max={max_page}), skipping TOC")
+        return {}
+
+    # Should span reasonable portion of document (at least 10%)
+    if max_page < total_pages * 0.1:
+        print(
+            f"[PARSE] TOC doesn't span document (max={max_page}, total={total_pages}), skipping"
+        )
+        return {}
+
+    # Need enough mappings to be useful (at least 3 sections)
+    if len(toc_map) < 3:
+        print(f"[PARSE] TOC only mapped {len(toc_map)} sections, skipping")
+        return {}
+
+    return toc_map
+
+
 def parse_toc(toc_text: str) -> Dict[str, int]:
     """
     Parse TOC to extract section -> starting page mapping.
@@ -315,43 +384,94 @@ def parse_toc(toc_text: str) -> Dict[str, int]:
     return section_to_page
 
 
-def assign_pages_from_toc(pages: List[dict], toc_map: Dict[str, int]) -> List[dict]:
+def find_best_toc_map(
+    pages: List[dict], total_pages: int
+) -> Tuple[Dict[str, int], str]:
     """
-    Use TOC mapping to assign section numbers to pages.
+    Find and validate the best section->page mapping from TOC or Index.
 
-    Logic: If TOC says section 04 22 00 starts on page 120,
-    then pages 120+ are section 04 22 00 until the next section starts.
+    Returns: (section_map, source) where source is "toc", "index", or ""
     """
-    if not toc_map:
-        return pages
+    # Find TOC and Index pages
+    toc_pages = find_toc_pages(pages)
+    index_pages = find_index_pages(pages)
 
-    # Sort sections by starting page
-    sorted_sections = sorted(toc_map.items(), key=lambda x: x[1])
+    toc_map = {}
+    index_map = {}
+
+    # Parse and validate TOC
+    if toc_pages:
+        print(f"[PARSE] Found text TOC on pages: {toc_pages}")
+        toc_text = "\n".join(
+            p["content"] for p in pages if p["page_number"] in toc_pages
+        )
+        raw_map = parse_toc(toc_text)
+        if raw_map:
+            print(f"[PARSE] TOC parsed {len(raw_map)} sections, validating...")
+            toc_map = validate_toc_map(raw_map, total_pages)
+            if toc_map:
+                print(f"[PARSE] TOC validated with {len(toc_map)} sections")
+
+    # Parse and validate Index
+    if index_pages:
+        print(f"[PARSE] Found Index on pages: {index_pages}")
+        index_text = "\n".join(
+            p["content"] for p in pages if p["page_number"] in index_pages
+        )
+        raw_map = parse_toc(index_text)
+        if raw_map:
+            print(f"[PARSE] Index parsed {len(raw_map)} sections, validating...")
+            index_map = validate_toc_map(raw_map, total_pages)
+            if index_map:
+                print(f"[PARSE] Index validated with {len(index_map)} sections")
+
+    # Return whichever has more sections
+    if len(index_map) > len(toc_map):
+        if toc_map:
+            print(f"[PARSE] Using Index ({len(index_map)}) over TOC ({len(toc_map)})")
+        return index_map, "index"
+    elif toc_map:
+        if index_map:
+            print(f"[PARSE] Using TOC ({len(toc_map)}) over Index ({len(index_map)})")
+        return toc_map, "toc"
+
+    if not toc_pages and not index_pages:
+        print("[PARSE] No text TOC or Index found")
+
+    return {}, ""
+
+
+def apply_section_map(
+    pages: List[dict], section_map: Dict[str, int], source: str
+) -> None:
+    """
+    Apply section->page mapping to unclassified pages.
+    Modifies pages in-place.
+    """
+    if not section_map:
+        return
+
+    sorted_sections = sorted(section_map.items(), key=lambda x: x[1])
 
     for page in pages:
+        # Skip already classified pages (including pre-tagged TOC pages)
+        if page["section_number"] is not None or page["division_code"] is not None:
+            continue
+
         page_num = page["page_number"]
-
-        # Find which section this page belongs to
-        assigned_section = None
         for i, (section, start_page) in enumerate(sorted_sections):
-            # Check if this page is in range for this section
             if page_num >= start_page:
-                # Check if there's a next section
-                if i + 1 < len(sorted_sections):
-                    next_start = sorted_sections[i + 1][1]
-                    if page_num < next_start:
-                        assigned_section = section
-                        break
-                else:
-                    # Last section - assign if page >= start
-                    assigned_section = section
-
-        if assigned_section:
-            page["section_number"] = assigned_section
-            page["division_code"] = assigned_section[:2]
-            page["classification_method"] = "toc"
-
-    return pages
+                # Check if before next section starts
+                next_start = (
+                    sorted_sections[i + 1][1]
+                    if i + 1 < len(sorted_sections)
+                    else float("inf")
+                )
+                if page_num < next_start:
+                    page["section_number"] = section
+                    page["division_code"] = section[:2]
+                    page["classification_method"] = source
+                    break
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -603,76 +723,27 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         )
         print(f"[PARSE] Outline classified {outline_classified} pages")
 
-    # TIER 1: Try text-based TOC and Index parsing, use whichever finds more sections
-    toc_pages = find_toc_pages(pages)
-    index_pages = find_index_pages(pages)
-    toc_map = {}
-    index_map = {}
+    # Pre-tag TOC/index pages as Division 00 BEFORE any classification
+    # This prevents TOC pages from being assigned to sections listed on them
+    toc_page_count = 0
+    for page in pages:
+        if page["section_number"] is not None:
+            continue  # Already classified by outline
+        if is_toc_page(page["content"]):
+            page["division_code"] = "00"
+            page["classification_method"] = "toc_page"
+            toc_page_count += 1
 
-    # Parse TOC if found
-    if toc_pages:
-        print(f"[PARSE] Found text TOC on pages: {toc_pages}")
-        toc_text = "\n".join(
-            [p["content"] for p in pages if p["page_number"] in toc_pages]
-        )
-        toc_map = parse_toc(toc_text)
-        if toc_map:
-            print(f"[PARSE] TOC mapped {len(toc_map)} sections")
+    if toc_page_count > 0:
+        print(f"[PARSE] Pre-tagged {toc_page_count} TOC/index pages as Division 00")
 
-    # Parse Index if found
-    if index_pages:
-        print(f"[PARSE] Found Index on pages: {index_pages}")
-        index_text = "\n".join(
-            [p["content"] for p in pages if p["page_number"] in index_pages]
-        )
-        index_map = parse_toc(index_text)  # Same parsing logic works for Index
-        if index_map:
-            print(f"[PARSE] Index mapped {len(index_map)} sections")
-
-    # Use whichever found more sections
-    best_map = {}
-    best_source = None
-    if len(index_map) > len(toc_map):
-        best_map = index_map
-        best_source = "index"
-        if toc_map:
-            print(
-                f"[PARSE] Using Index ({len(index_map)} sections) over TOC ({len(toc_map)} sections)"
-            )
-    elif toc_map:
-        best_map = toc_map
-        best_source = "toc"
-        if index_map:
-            print(
-                f"[PARSE] Using TOC ({len(toc_map)} sections) over Index ({len(index_map)} sections)"
-            )
-
-    # Apply the best mapping to unclassified pages
-    if best_map:
-        sorted_sections = sorted(best_map.items(), key=lambda x: x[1])
-        for page in pages:
-            if page["section_number"] is None:
-                page_num = page["page_number"]
-                for i, (section, start_page) in enumerate(sorted_sections):
-                    if page_num >= start_page:
-                        if i + 1 < len(sorted_sections):
-                            next_start = sorted_sections[i + 1][1]
-                            if page_num < next_start:
-                                page["section_number"] = section
-                                page["division_code"] = section[:2]
-                                page["classification_method"] = best_source
-                                break
-                        else:
-                            page["section_number"] = section
-                            page["division_code"] = section[:2]
-                            page["classification_method"] = best_source
-
-    if not toc_pages and not index_pages:
-        print("[PARSE] No text TOC or Index found")
+    # TIER 1: Try text-based TOC and Index parsing
+    section_map, map_source = find_best_toc_map(pages, total_pages)
+    apply_section_map(pages, section_map, map_source)
 
     # TIER 2 & 3: For pages not classified, try footer then keywords
     for page in pages:
-        if page["section_number"] is not None:
+        if page["section_number"] is not None or page["division_code"] is not None:
             continue  # Already classified
 
         # Try footer pattern
@@ -688,7 +759,6 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         if division:
             page["division_code"] = division
             page["classification_method"] = "keyword"
-            # Note: section_number stays None for keyword-classified pages
 
     # Extract cross-references for all pages
     for page in pages:
@@ -714,6 +784,9 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     keyword_classified = sum(
         1 for p in pages if p.get("classification_method") == "keyword"
     )
+    toc_page_classified = sum(
+        1 for p in pages if p.get("classification_method") == "toc_page"
+    )
     unclassified = len(pages) - classified
 
     print(f"[PARSE] Classification summary:")
@@ -724,6 +797,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     print(f"[PARSE]     - By Index: {index_classified}")
     print(f"[PARSE]     - By footer: {footer_classified}")
     print(f"[PARSE]     - By keyword: {keyword_classified}")
+    print(f"[PARSE]     - TOC/index pages (Div 00): {toc_page_classified}")
     print(f"[PARSE]   Unclassified: {unclassified}")
 
     # Build division summary
@@ -764,10 +838,8 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         "sections": sorted(list(sections_found)),
         "outline_found": len(outline_map) > 0,
         "outline_sections_mapped": len(outline_map),
-        "toc_found": len(toc_pages) > 0,
-        "toc_sections_mapped": len(toc_map),
-        "index_found": len(index_pages) > 0,
-        "index_sections_mapped": len(index_map),
+        "toc_found": map_source in ("toc", "index"),
+        "toc_sections_mapped": len(section_map),
         "classification_stats": {
             "total": len(pages),
             "classified": classified,
@@ -776,6 +848,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             "index": index_classified,
             "footer": footer_classified,
             "keyword": keyword_classified,
+            "toc_page": toc_page_classified,
             "unclassified": unclassified,
         },
     }
