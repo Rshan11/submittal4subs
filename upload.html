@@ -1,143 +1,224 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PM4Subs Spec Analyzer</title>
-    <script type="module">
-        import { requireAuth } from './lib/supabase.js'
-        await requireAuth()
-    </script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <!-- Navigation Header -->
-    <header class="top-nav-bar">
-        <div class="nav-container">
-            <div class="nav-left">
-                <a href="/dashboard.html" class="logo-link">
-                    🔨 <span>PM4Subs Spec Analyzer</span>
-                </a>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Spec Analyzer | PM4Subs</title>
+        <script type="module" src="/auth-check.js"></script>
+        <link
+            rel="icon"
+            href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
+        />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <!-- Navigation Header -->
+        <header class="top-nav-bar">
+            <div class="nav-container">
+                <div class="nav-left">
+                    <a href="/dashboard.html" class="logo-link">
+                        <span class="logo-text">PM4Subs</span>
+                        <span class="beta-pill">Beta</span>
+                    </a>
+                </div>
+                <div class="nav-right">
+                    <a href="/dashboard.html" class="nav-link-back"
+                        >Dashboard</a
+                    >
+                    <span class="nav-user-email" id="navUserEmail"></span>
+                    <button class="btn-nav-logout" id="navLogoutBtn">
+                        Sign Out
+                    </button>
+                </div>
             </div>
-            <div class="nav-right">
-                <a href="/dashboard.html" class="nav-link-back">← Back to Dashboard</a>
-                <span class="nav-user-email" id="navUserEmail"></span>
-                <button class="btn-nav-logout" id="navLogoutBtn">Sign Out</button>
-            </div>
-        </div>
-    </header>
-
-    <div class="container">
-        <!-- Free Beta Banner -->
-        <div class="beta-banner">
-            🎉 FREE BETA - No credit card required
-        </div>
-        
-        <header>
-            <h1>🔨 PM4Subs Spec Analyzer</h1>
-            <p>Upload construction specifications to automatically extract requirements, identify gaps, and generate RFI questions</p>
         </header>
 
-        <main>
-            <!-- Trade Selection Section -->
-            <section class="trade-section" id="tradeSection">
-                <h2>What trade are you bidding?</h2>
-                <p>Select your trade to get targeted analysis and coordination requirements</p>
-                
-                <select id="tradeSelect" class="trade-select">
-                    <option value="">Select your trade...</option>
-                    <option value="masonry">Masonry (Division 04)</option>
-                    <option value="concrete">Concrete (Division 03)</option>
-                    <option value="steel">Structural Steel (Division 05)</option>
-                    <option value="carpentry">Carpentry (Division 06)</option>
-                    <option value="waterproofing">Waterproofing (Division 07)</option>
-                    <option value="doors-windows">Doors & Windows (Division 08)</option>
-                    <option value="drywall">Drywall (Division 09)</option>
-                    <option value="roofing">Roofing (Division 07)</option>
-                    <option value="hvac">HVAC (Division 23)</option>
-                    <option value="plumbing">Plumbing (Division 22)</option>
-                    <option value="electrical">Electrical (Division 26)</option>
-                    <option value="sitework">Sitework (Division 31)</option>
-                    <option value="other">Other...</option>
-                </select>
-                
-                <div id="tradeDescription" class="trade-description"></div>
-            </section>
-
-            <!-- Upload Section -->
-            <section class="upload-section" id="uploadSection" style="opacity: 0.5; pointer-events: none;">
-                <!-- Email Input -->
-                <div class="email-input-box">
-                    <label for="userEmail">Your Email (for receiving analysis)</label>
-                    <input type="email" id="userEmail" placeholder="your.email@company.com" required>
-                </div>
-                
-                <div class="upload-box" id="uploadBox">
-                    <div class="upload-icon">📄</div>
-                    <h2>Drop Spec PDF Here</h2>
-                    <p>or click to browse</p>
-                    <input type="file" id="fileInput" accept=".pdf" hidden>
-                </div>
-                
-                <div class="file-info" id="fileInfo" style="display: none;">
-                    <div class="file-details">
-                        <span id="fileName"></span>
-                        <span id="fileSize"></span>
+        <div class="container">
+            <main>
+                <!-- Upload Section (Now First) -->
+                <section class="card" id="uploadSection">
+                    <div class="card-header">
+                        <h2>Upload Specification</h2>
                     </div>
-                    <button class="btn btn-primary" id="analyzeBtn">Analyze Specification</button>
-                    <button class="btn btn-secondary" id="clearBtn">Clear</button>
-                </div>
-            </section>
+                    <div class="card-body">
+                        <div class="upload-box" id="uploadBox">
+                            <div class="upload-icon">
+                                <svg
+                                    width="48"
+                                    height="48"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="1.5"
+                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                                    />
+                                </svg>
+                            </div>
+                            <p class="upload-text">
+                                Drop PDF here or click to browse
+                            </p>
+                            <p class="upload-hint">
+                                Supports construction specification documents
+                            </p>
+                            <input
+                                type="file"
+                                id="fileInput"
+                                accept=".pdf"
+                                hidden
+                            />
+                        </div>
 
-            <!-- Loading Section -->
-            <section class="loading-section" id="loadingSection" style="display: none;">
-                <div class="loading-spinner"></div>
-                <h2>Analyzing Specification...</h2>
-                <p id="loadingStatus">Extracting text from PDF...</p>
-                <div class="progress-container">
-                    <div class="progress-bar">
-                        <div id="progressFill" class="progress-fill"></div>
+                        <div
+                            class="file-info"
+                            id="fileInfo"
+                            style="display: none"
+                        >
+                            <div class="file-details">
+                                <span id="fileName"></span>
+                                <span id="fileSize"></span>
+                            </div>
+                            <div class="file-actions">
+                                <button class="btn btn-primary" id="scanBtn">
+                                    Scan for Divisions
+                                </button>
+                                <button class="btn btn-secondary" id="clearBtn">
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <p id="progressText" class="progress-text">Estimated time: 2-3 minutes</p>
-                </div>
-            </section>
+                </section>
 
-            <!-- Results Section -->
-            <section class="results-section" id="resultsSection" style="display: none;">
-                <div class="results-header">
-                    <h2>Analysis Complete</h2>
-                    <div class="results-actions">
-                        <button class="btn btn-primary" id="downloadPdfBtn">📄 Download PDF Report</button>
-                        <button class="btn btn-secondary" id="downloadBtn">📥 Download Markdown</button>
-                        <button class="btn btn-secondary" id="newAnalysisBtn">🔄 New Analysis</button>
+                <!-- Division Selection Section (shown after scan) -->
+                <section
+                    class="card"
+                    id="divisionSection"
+                    style="display: none"
+                >
+                    <div class="card-header">
+                        <h2>Select Division to Analyze</h2>
                     </div>
-                </div>
-                
-                <div class="results-content" id="resultsContent">
-                    <!-- Analysis results will be inserted here -->
-                </div>
-            </section>
+                    <div class="card-body">
+                        <p class="scan-summary" id="scanSummary"></p>
+                        <label class="form-label"
+                            >Choose a division from this spec:</label
+                        >
+                        <select id="divisionSelect" class="trade-select">
+                            <option value="">Select a division...</option>
+                            <!-- Options populated dynamically after scan -->
+                        </select>
+                        <div class="file-actions" style="margin-top: 16px">
+                            <button class="btn btn-primary" id="analyzeBtn">
+                                Analyze Division
+                            </button>
+                        </div>
+                    </div>
+                </section>
 
-            <!-- Error Section -->
-            <section class="error-section" id="errorSection" style="display: none;">
-                <div class="error-box">
-                    <h2>⚠️ Error</h2>
-                    <p id="errorMessage"></p>
-                    <button class="btn btn-primary" id="tryAgainBtn">Try Again</button>
-                </div>
-            </section>
-        </main>
+                <!-- Loading Section -->
+                <section
+                    class="card loading-card"
+                    id="loadingSection"
+                    style="display: none"
+                >
+                    <div class="card-body loading-body">
+                        <div class="loading-spinner"></div>
+                        <h2>Analyzing Specification</h2>
+                        <p id="loadingStatus" class="loading-status">
+                            Extracting text from PDF...
+                        </p>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div
+                                    id="progressFill"
+                                    class="progress-fill"
+                                ></div>
+                            </div>
+                            <p id="progressText" class="progress-text">
+                                Estimated time: 2-3 minutes
+                            </p>
+                        </div>
+                    </div>
+                </section>
 
-        <footer>
-            <p>PM4Subs © 2025 | Local Development Version</p>
-        </footer>
-    </div>
+                <!-- Results Section -->
+                <section
+                    class="card results-card"
+                    id="resultsSection"
+                    style="display: none"
+                >
+                    <div class="card-header results-header">
+                        <h2>Analysis Complete</h2>
+                        <div class="results-actions">
+                            <button class="btn btn-primary" id="downloadPdfBtn">
+                                Download PDF
+                            </button>
+                            <button class="btn btn-secondary" id="downloadBtn">
+                                Download Markdown
+                            </button>
+                            <button class="btn btn-ghost" id="newAnalysisBtn">
+                                New Analysis
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="results-content" id="resultsContent">
+                            <!-- Analysis results will be inserted here -->
+                        </div>
+                    </div>
+                </section>
 
-    <!-- PDF Generation Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
-    <script type="module" src="/main.js"></script>
-</body>
+                <!-- Error Section -->
+                <section
+                    class="card error-card"
+                    id="errorSection"
+                    style="display: none"
+                >
+                    <div class="card-body error-body">
+                        <div class="error-icon">
+                            <svg
+                                width="48"
+                                height="48"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="1.5"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                            </svg>
+                        </div>
+                        <h2>Something went wrong</h2>
+                        <p id="errorMessage" class="error-message"></p>
+                        <button class="btn btn-primary" id="tryAgainBtn">
+                            Try Again
+                        </button>
+                    </div>
+                </section>
+            </main>
+
+            <footer class="page-footer">
+                <p>PM4Subs &copy; 2025</p>
+            </footer>
+        </div>
+
+        <!-- PDF Generation Libraries -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+        <script type="module" src="/main.js"></script>
+    </body>
 </html>
