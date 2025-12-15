@@ -2,55 +2,66 @@
 PDF Parser - Header/Footer Scanning & Tile Generation
 Uses pdfplumber for text extraction
 """
-import re
+
 import io
-from typing import List, Dict, Any, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
 import pdfplumber
 
 # ═══════════════════════════════════════════════════════════════
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════
 
-TILE_SIZE = 4000        # Characters per tile
-TILE_OVERLAP = 500      # Overlap between tiles
+TILE_SIZE = 4000  # Characters per tile
+TILE_OVERLAP = 500  # Overlap between tiles
 
 # Division header patterns
 DIVISION_PATTERNS = [
     # "DIVISION 04 - MASONRY" or "DIVISION 4 MASONRY"
-    r'DIVISION\s+(\d{1,2})\s*[-–—:]?\s*([A-Z][A-Z\s&/]+)',
+    r"DIVISION\s+(\d{1,2})\s*[-–—:]?\s*([A-Z][A-Z\s&/]+)",
     # "SECTION 04 20 00" or "04 20 00 UNIT MASONRY"
-    r'SECTION\s+(\d{2})\s*(\d{2})\s*(\d{2})',
-    r'^(\d{2})\s+(\d{2})\s+(\d{2})\s+([A-Z][A-Z\s]+)',
+    r"SECTION\s+(\d{2})\s*(\d{2})\s*(\d{2})",
+    r"^(\d{2})\s+(\d{2})\s+(\d{2})\s+([A-Z][A-Z\s]+)",
 ]
 
 # Section validation keywords (must appear near division headers)
 VALIDATION_KEYWORDS = [
-    'PART 1', 'PART 2', 'PART 3',
-    'GENERAL', 'PRODUCTS', 'EXECUTION',
-    'SCOPE', 'SUBMITTALS', 'QUALITY',
-    'MATERIALS', 'INSTALLATION', 'RELATED'
+    "PART 1",
+    "PART 2",
+    "PART 3",
+    "GENERAL",
+    "PRODUCTS",
+    "EXECUTION",
+    "SCOPE",
+    "SUBMITTALS",
+    "QUALITY",
+    "MATERIALS",
+    "INSTALLATION",
+    "RELATED",
 ]
 
 # Cross-reference pattern: XX XX XX (section numbers)
-CROSS_REF_PATTERN = r'\b(\d{2})\s+(\d{2})\s+(\d{2})\b'
+CROSS_REF_PATTERN = r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b"
 
 
 # ═══════════════════════════════════════════════════════════════
 # PDF TEXT EXTRACTION
 # ═══════════════════════════════════════════════════════════════
 
+
 def clean_text(text: str) -> str:
     """Remove problematic Unicode characters that cause encoding issues"""
     # Remove zero-width characters and other problematic Unicode
     problematic = [
-        '\u200b',  # zero-width space
-        '\u200c',  # zero-width non-joiner
-        '\u200d',  # zero-width joiner
-        '\ufeff',  # BOM
-        '\u00ad',  # soft hyphen
+        "\u200b",  # zero-width space
+        "\u200c",  # zero-width non-joiner
+        "\u200d",  # zero-width joiner
+        "\ufeff",  # BOM
+        "\u00ad",  # soft hyphen
     ]
     for char in problematic:
-        text = text.replace(char, '')
+        text = text.replace(char, "")
     return text
 
 
@@ -89,6 +100,7 @@ def extract_pages(pdf_bytes: bytes, start_page: int, end_page: int) -> str:
 # DIVISION SCANNING (Header/Footer Pattern Matching)
 # ═══════════════════════════════════════════════════════════════
 
+
 def scan_divisions(pdf_bytes: bytes) -> List[Dict[str, Any]]:
     """
     Scan PDF for division headers using header/footer pattern matching.
@@ -105,7 +117,7 @@ def scan_divisions(pdf_bytes: bytes) -> List[Dict[str, Any]]:
 
             # Debug: print first 200 chars of pages around 100
             if 98 <= page_num <= 105:
-                preview = text[:300].replace('\n', ' | ')
+                preview = text[:300].replace("\n", " | ")
                 print(f"[DEBUG] Page {page_num}: {preview}")
 
             # Check for division headers
@@ -143,11 +155,11 @@ def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]
     # Handles: SECTION042900, SECTION 04 29 00, SECTION04 29 00, etc.
     patterns = [
         # SECTION followed by 6 digits (with or without spaces)
-        r'SECTION\s*(\d{2})\s*(\d{2})\s*(\d{2})',
+        r"SECTION\s*(\d{2})\s*(\d{2})\s*(\d{2})",
         # Just 6 digits at start of line
-        r'^(\d{2})\s*(\d{2})\s*(\d{2})\b',
+        r"^(\d{2})\s*(\d{2})\s*(\d{2})\b",
         # 6 digits followed by dash and title
-        r'(\d{2})\s*(\d{2})\s*(\d{2})\s*[-–—]',
+        r"(\d{2})\s*(\d{2})\s*(\d{2})\s*[-–—]",
     ]
 
     for pattern in patterns:
@@ -159,18 +171,18 @@ def detect_division_header(text: str, page_num: int) -> Optional[Dict[str, Any]]
                 "division_code": div_code,
                 "section_number": section_number,
                 "section_title": None,
-                "start_page": page_num
+                "start_page": page_num,
             }
 
     # PATTERN GROUP 2: DIVISION XX format
-    match = re.search(r'DIVISION\s*(\d{1,2})', text, re.IGNORECASE)
+    match = re.search(r"DIVISION\s*(\d{1,2})", text, re.IGNORECASE)
     if match:
         div_code = match.group(1).zfill(2)
         return {
             "division_code": div_code,
             "section_number": None,
             "section_title": None,
-            "start_page": page_num
+            "start_page": page_num,
         }
 
     return None
@@ -205,7 +217,7 @@ def merge_division_sections(divisions: List[Dict[str, Any]]) -> List[Dict[str, A
                 "section_title": div["section_title"],
                 "start_page": div["start_page"],
                 "end_page": div["end_page"],
-                "sections": [div]
+                "sections": [div],
             }
         else:
             # Extend existing division
@@ -219,6 +231,7 @@ def merge_division_sections(divisions: List[Dict[str, Any]]) -> List[Dict[str, A
 # TEXT TILING
 # ═══════════════════════════════════════════════════════════════
 
+
 def tile_text(
     text: str,
     spec_id: str,
@@ -226,7 +239,7 @@ def tile_text(
     section_number: Optional[str] = None,
     section_title: Optional[str] = None,
     tile_size: int = TILE_SIZE,
-    overlap: int = TILE_OVERLAP
+    overlap: int = TILE_OVERLAP,
 ) -> List[Dict[str, Any]]:
     """
     Split text into overlapping tiles for processing.
@@ -238,7 +251,7 @@ def tile_text(
     tile_index = 0
 
     # Track page numbers in the text
-    page_pattern = re.compile(r'--- Page (\d+) ---')
+    page_pattern = re.compile(r"--- Page (\d+) ---")
 
     while start < len(text):
         end = min(start + tile_size, len(text))
@@ -255,18 +268,20 @@ def tile_text(
         # Detect PART designation
         part = detect_part(tile_content)
 
-        tiles.append({
-            "spec_id": spec_id,
-            "division_code": division_code,
-            "section_number": section_number,
-            "section_title": section_title,
-            "part": part,
-            "page_from": page_from,
-            "page_to": page_to,
-            "tile_index": tile_index,
-            "content": tile_content,
-            "cross_refs": cross_refs
-        })
+        tiles.append(
+            {
+                "spec_id": spec_id,
+                "division_code": division_code,
+                "section_number": section_number,
+                "section_title": section_title,
+                "part": part,
+                "page_from": page_from,
+                "page_to": page_to,
+                "tile_index": tile_index,
+                "content": tile_content,
+                "cross_refs": cross_refs,
+            }
+        )
 
         tile_index += 1
         start += step
@@ -300,12 +315,12 @@ def detect_part(text: str) -> Optional[str]:
     """Detect which PART this tile primarily contains"""
     text_upper = text.upper()
 
-    if 'PART 3' in text_upper and 'EXECUTION' in text_upper:
-        return 'PART 3 EXECUTION'
-    elif 'PART 2' in text_upper and 'PRODUCTS' in text_upper:
-        return 'PART 2 PRODUCTS'
-    elif 'PART 1' in text_upper and 'GENERAL' in text_upper:
-        return 'PART 1 GENERAL'
+    if "PART 3" in text_upper and "EXECUTION" in text_upper:
+        return "PART 3 EXECUTION"
+    elif "PART 2" in text_upper and "PRODUCTS" in text_upper:
+        return "PART 2 PRODUCTS"
+    elif "PART 1" in text_upper and "GENERAL" in text_upper:
+        return "PART 1 GENERAL"
 
     return None
 
@@ -314,26 +329,61 @@ def detect_part(text: str) -> Optional[str]:
 # FULL PARSE PIPELINE
 # ═══════════════════════════════════════════════════════════════
 
+
 def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     """
-    Full parsing pipeline:
-    1. Scan for divisions
-    2. Extract text per division
-    3. Generate tiles
+    Full parsing pipeline - memory optimized to open PDF only once:
+    1. Extract all pages to text dict
+    2. Scan for divisions
+    3. Generate tiles from cached text
     """
-    # Step 1: Scan divisions
-    divisions = scan_divisions(pdf_bytes)
+    divisions = []
+    current_division = None
+    page_texts = {}  # Cache: page_num -> text
+    page_count = 0
 
-    # Step 2: Get total page count
+    # Single pass: extract all text and detect divisions
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         page_count = len(pdf.pages)
+        print(f"[PARSE] Processing {page_count} pages...")
 
-    # Step 3: Generate tiles for each division
+        for page_num, page in enumerate(pdf.pages, 1):
+            # Extract and cache page text
+            text = clean_text(page.extract_text() or "")
+            page_texts[page_num] = text
+
+            # Check for division headers
+            division_info = detect_division_header(text, page_num)
+
+            if division_info:
+                # Close previous division
+                if current_division:
+                    current_division["end_page"] = page_num - 1
+                    divisions.append(current_division)
+                current_division = division_info
+
+            # Progress logging every 50 pages
+            if page_num % 50 == 0:
+                print(f"[PARSE] Processed {page_num}/{page_count} pages...")
+
+        # Close last division
+        if current_division:
+            current_division["end_page"] = page_count
+            divisions.append(current_division)
+
+    # Merge consecutive sections of the same division
+    divisions = merge_division_sections(divisions)
+    print(f"[PARSE] Found {len(divisions)} divisions")
+
+    # Generate tiles from cached text (no re-reading PDF)
     all_tiles = []
 
     for div in divisions:
-        # Extract text for this division's page range
-        div_text = extract_pages(pdf_bytes, div["start_page"], div["end_page"])
+        # Build text from cached pages
+        div_text = ""
+        for pg in range(div["start_page"], div["end_page"] + 1):
+            if pg in page_texts:
+                div_text += f"\n--- Page {pg} ---\n{page_texts[pg]}"
 
         # Generate tiles
         tiles = tile_text(
@@ -341,15 +391,19 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             spec_id=spec_id,
             division_code=div["division_code"],
             section_number=div.get("section_number"),
-            section_title=div.get("section_title")
+            section_title=div.get("section_title"),
         )
-
         all_tiles.extend(tiles)
+
+    # Clear cache to free memory
+    page_texts.clear()
+
+    print(f"[PARSE] Generated {len(all_tiles)} tiles")
 
     return {
         "page_count": page_count,
         "divisions": divisions,
         "tiles": all_tiles,
         "division_count": len(divisions),
-        "tile_count": len(all_tiles)
+        "tile_count": len(all_tiles),
     }
