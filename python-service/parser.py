@@ -189,82 +189,74 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
     if not text or len(text) < 100:
         return None, None
 
-    # Check header (first 600 chars) and footer (last 600 chars)
+    # Check BOTH header (first 600 chars) and footer (last 600 chars)
+    # PDF text extraction sometimes puts page footers at the START of text
     header = text[:600].upper() if len(text) > 600 else text.upper()
     footer = text[-600:].upper() if len(text) > 600 else text.upper()
 
-    # DEBUG: Log footer for specific pages to see actual format
-    # Check for "04" anywhere in footer to catch Division 04 pages
-    if "04" in footer and (
-        "MASONRY" in footer or "CMU" in footer or "04220" in footer or "04 22" in footer
-    ):
-        # Extract page number from content if possible
-        import hashlib
+    # Combine both regions for searching - footer text may be in either location
+    search_regions = [header, footer]
 
-        page_hash = hashlib.md5(text[:100].encode()).hexdigest()[:8]
-        print(f"[DEBUG] Footer sample ({page_hash}): {repr(footer[-200:])}")
-
-    # Pattern 1a: Footer 6-digit format with spaces and page number
-    # Matches: "04 22 00 - 5", "04 22 00.13 - 5"
-    footer_6digit = re.compile(
+    # Pattern 1a: 6-digit format with page number: "04 22 00 - 5"
+    pattern_6digit = re.compile(
         r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
     )
 
-    match = footer_6digit.search(footer)
-    if match:
-        div = match.group(1)
-        if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-            if match.group(4):
-                section += f".{match.group(4)}"
-            return section, div
+    for region in search_regions:
+        match = pattern_6digit.search(region)
+        if match:
+            div = match.group(1)
+            if div in VALID_DIVISIONS and div not in ("00", "01"):
+                section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+                if match.group(4):
+                    section += f".{match.group(4)}"
+                return section, div
 
-    # Pattern 1b: Footer 5-digit format (no spaces) with page number
-    # Matches: "04220 - 5" (older CSI format)
-    footer_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
+    # Pattern 1b: 5-digit format with page number: "04220 - 5"
+    pattern_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
 
-    match = footer_5digit.search(footer)
-    if match:
-        div = match.group(1)
-        if div in VALID_DIVISIONS and div not in ("00", "01"):
-            # Keep as 5-digit format
-            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-            return section, div
+    for region in search_regions:
+        match = pattern_5digit.search(region)
+        if match:
+            div = match.group(1)
+            if div in VALID_DIVISIONS and div not in ("00", "01"):
+                section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+                return section, div
 
-    # Pattern 2a: Header with "SECTION" keyword - 6-digit format
-    # Matches: "SECTION 04 22 00"
-    header_6digit = re.compile(
+    # Pattern 2a: "SECTION 04 22 00" header
+    pattern_section_6digit = re.compile(
         r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
     )
 
-    match = header_6digit.search(header)
-    if match:
-        div = match.group(1)
-        if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-            if match.group(4):
-                section += f".{match.group(4)}"
-            return section, div
+    for region in search_regions:
+        match = pattern_section_6digit.search(region)
+        if match:
+            div = match.group(1)
+            if div in VALID_DIVISIONS and div not in ("00", "01"):
+                section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+                if match.group(4):
+                    section += f".{match.group(4)}"
+                return section, div
 
-    # Pattern 2b: Header with "SECTION" keyword - 5-digit format
-    # Matches: "SECTION 04220"
-    header_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
+    # Pattern 2b: "SECTION 04220" header
+    pattern_section_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
 
-    match = header_5digit.search(header)
-    if match:
-        div = match.group(1)
-        if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-            return section, div
+    for region in search_regions:
+        match = pattern_section_5digit.search(region)
+        if match:
+            div = match.group(1)
+            if div in VALID_DIVISIONS and div not in ("00", "01"):
+                section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+                return section, div
 
-    # Pattern 3: "DIVISION XX" header (division start pages)
-    # Matches: "DIVISION 04", "DIVISION 4 -", "DIVISION 04 - MASONRY"
-    division_header = re.compile(r"DIVISION\s+(0?[1-9]|[1-4]\d)\b")
+    # Pattern 3: "DIVISION XX" header
+    pattern_division = re.compile(r"DIVISION\s+(0?[1-9]|[1-4]\d)\b")
 
-    match = division_header.search(header)
-    if match:
-        div = match.group(1).zfill(2)  # Pad single digit to 2 digits
-        if div in VALID_DIVISIONS and div not in ("00", "01"):
+    for region in search_regions:
+        match = pattern_division.search(region)
+        if match:
+            div = match.group(1).zfill(2)
+            if div in VALID_DIVISIONS and div not in ("00", "01"):
             return f"{div} 00 00", div
 
     return None, None
@@ -911,14 +903,6 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         # Skip blank/nearly blank pages
         if not text or len(text.strip()) < 50:
             continue
-
-        # DEBUG: Log specific pages to see footer format
-        actual_page = page_num + 1
-        if actual_page in [507, 508, 509, 510]:
-            footer = text[-300:] if len(text) > 300 else text
-            print(f"[DEBUG] Page {actual_page} last 300 chars:")
-            print(repr(footer))
-            print("---")
 
         pages.append(
             {
