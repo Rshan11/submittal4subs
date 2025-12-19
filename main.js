@@ -89,7 +89,7 @@ async function checkForExistingSpec(jobId) {
       .eq("status", "ready")
       .order("created_at", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (error || !existingSpec) {
       console.log("[SPEC] No existing spec found, showing upload form");
