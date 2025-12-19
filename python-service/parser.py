@@ -193,6 +193,17 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
     header = text[:600].upper() if len(text) > 600 else text.upper()
     footer = text[-600:].upper() if len(text) > 600 else text.upper()
 
+    # DEBUG: Log footer for specific pages to see actual format
+    # Check for "04" anywhere in footer to catch Division 04 pages
+    if "04" in footer and (
+        "MASONRY" in footer or "CMU" in footer or "04220" in footer or "04 22" in footer
+    ):
+        # Extract page number from content if possible
+        import hashlib
+
+        page_hash = hashlib.md5(text[:100].encode()).hexdigest()[:8]
+        print(f"[DEBUG] Footer sample ({page_hash}): {repr(footer[-200:])}")
+
     # Pattern 1a: Footer 6-digit format with spaces and page number
     # Matches: "04 22 00 - 5", "04 22 00.13 - 5"
     footer_6digit = re.compile(
