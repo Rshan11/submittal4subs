@@ -165,30 +165,63 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
     Check if page content contains a division header that should override bookmark.
 
     Looks for section headers like "SECTION 04 20 00" or "04 20 00 UNIT MASONRY"
-    in the first 500 characters of the page.
+    anywhere in the page content (not just first 500 chars).
 
     Returns: (section_number, division_code) or (None, None)
     """
     if not text:
         return None, None
 
-    header_text = text[:500].upper()
+    text_upper = text.upper()
 
-    # Pattern: Look for section numbers at start of page
+    # Pattern: Look for section numbers anywhere in page
     # Matches: "SECTION 04 20 00", "04 20 00 UNIT MASONRY", etc.
     pattern = re.compile(r"(?:SECTION\s+)?(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?")
 
-    match = pattern.search(header_text)
-    if match:
-        div = match.group(1)
-        # Validate it's a real CSI division (not 00 which is procurement)
-        if div in VALID_DIVISIONS and div != "00":
-            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-            if match.group(4):
-                section += f".{match.group(4)}"
+    # Find ALL section numbers on the page
+    matches = pattern.findall(text_upper)
+
+    # Filter to valid trade divisions (not 00 or 01)
+    for match in matches:
+        div = match[0]
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match[0]} {match[1]} {match[2]}"
+            if match[3]:
+                section += f".{match[3]}"
             return section, div
 
     return None, None
+
+
+def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
+    """
+    Find ALL division references in page content.
+    Used for pages that contain multiple sections (like outline specs).
+
+    Returns: List of (section_number, division_code) tuples
+    """
+    if not text:
+        return []
+
+    text_upper = text.upper()
+
+    pattern = re.compile(r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?")
+
+    matches = pattern.findall(text_upper)
+
+    divisions = []
+    seen = set()
+    for match in matches:
+        div = match[0]
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match[0]} {match[1]} {match[2]}"
+            if match[3]:
+                section += f".{match[3]}"
+            if section not in seen:
+                seen.add(section)
+                divisions.append((section, div))
+
+    return divisions
 
 
 def assign_pages_from_outline(
@@ -867,6 +900,23 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             if p["section_number"]:
                 sections_found.add(p["section_number"])
                 division_summary[div]["sections"].add(p["section_number"])
+
+        # ALSO scan page content for all division references
+        # This catches outline specs where multiple divisions appear on one page
+        content_divisions = detect_all_divisions_from_content(p.get("content", ""))
+        for section, content_div in content_divisions:
+            divisions_found.add(content_div)
+            sections_found.add(section)
+            if content_div not in division_summary:
+                division_summary[content_div] = {
+                    "pages": [],
+                    "count": 0,
+                    "sections": set(),
+                }
+            if p["page_number"] not in division_summary[content_div]["pages"]:
+                division_summary[content_div]["pages"].append(p["page_number"])
+                division_summary[content_div]["count"] += 1
+            division_summary[content_div]["sections"].add(section)
 
     # Convert sections set to list for JSON serialization
     for div in division_summary:
