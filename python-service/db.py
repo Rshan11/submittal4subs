@@ -7,8 +7,9 @@ Supports both:
 """
 
 import os
-from supabase import create_client, Client
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from supabase import Client, create_client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -335,7 +336,7 @@ def insert_analysis(
         "analysis_type": analysis_type,
         "result": result,
         "processing_time_ms": processing_time_ms,
-        "processing_time_ms": processing_time_ms
+        "processing_time_ms": processing_time_ms,
     }
 
     result_data = client.table("spec_analyses").insert(data).execute()
@@ -368,3 +369,37 @@ def get_all_analyses(spec_id: str) -> List[Dict[str, Any]]:
         .execute()
     )
     return result.data or []
+
+
+# ═══════════════════════════════════════════════════════════════
+# JOBS TABLE
+# ═══════════════════════════════════════════════════════════════
+
+
+def delete_job(job_id: str, user_id: str) -> bool:
+    """
+    Delete a job and all related data.
+    Due to CASCADE deletes on foreign keys, this will also delete:
+    - All specs for this job
+    - All spec_pages for those specs
+    - All spec_analyses for those specs
+
+    Returns True if successful, False if job not found or not owned by user.
+    """
+    client = get_supabase()
+
+    # First verify the job exists and belongs to this user
+    result = (
+        client.table("jobs")
+        .select("id")
+        .eq("id", job_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not result.data:
+        return False
+
+    # Delete the job (cascades to specs, pages, analyses)
+    client.table("jobs").delete().eq("id", job_id).execute()
+    return True

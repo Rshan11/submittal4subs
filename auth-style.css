@@ -1,61 +1,38 @@
-/* PM4Subs Auth Styles - Light Theme with Rivian Blue */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-:root {
-    --bg-base: #f8fafc;
-    --bg-surface: #ffffff;
-    --bg-elevated: #f1f5f9;
-    --border: #e2e8f0;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-muted: #94a3b8;
-    --accent-primary: #1A3C6E;
-    --accent-primary-hover: #0F2847;
-    --accent-primary-light: rgba(26, 60, 110, 0.1);
-    --accent-danger: #ef4444;
-    --accent-success: #22c55e;
-    --radius: 8px;
-}
+/* PM4Subs Auth Styles - Login/Signup Page */
+@import url("./assets/css/shared-styles.css");
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg-base);
-    min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 20px;
+    padding: var(--space-lg);
+    background: linear-gradient(135deg, var(--bg) 0%, #e8ecf1 100%);
 }
 
 .auth-container {
     width: 100%;
-    max-width: 400px;
+    max-width: 420px;
 }
 
 .auth-card {
-    background: var(--bg-surface);
+    background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 32px;
-    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    box-shadow: var(--shadow-lg);
 }
 
 .auth-header {
     text-align: center;
-    margin-bottom: 28px;
+    margin-bottom: var(--space-xl);
 }
 
 .brand {
-    font-size: 26px;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-size: 28px;
     font-weight: 700;
-    color: var(--accent-primary);
-    margin-bottom: 6px;
+    color: var(--primary);
+    margin-bottom: var(--space-xs);
     letter-spacing: -0.5px;
 }
 
@@ -67,29 +44,30 @@ body {
 .auth-tabs {
     display: flex;
     gap: 4px;
-    margin-bottom: 24px;
+    margin-bottom: var(--space-lg);
     padding: 4px;
-    background: var(--bg-elevated);
-    border-radius: var(--radius);
+    background: var(--bg);
+    border-radius: var(--radius-btn);
 }
 
 .auth-tab {
     flex: 1;
-    padding: 10px;
+    padding: var(--space-sm);
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
+    font-family: "Manrope", sans-serif;
     font-size: 14px;
     font-weight: 500;
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--transition-fast);
 }
 
 .auth-tab.active {
-    background: var(--bg-surface);
+    background: var(--panel);
     color: var(--text-primary);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-sm);
 }
 
 .auth-tab:hover:not(.active) {
@@ -97,23 +75,23 @@ body {
 }
 
 .message-box {
-    padding: 12px 14px;
-    border-radius: var(--radius);
-    margin-bottom: 20px;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-btn);
+    margin-bottom: var(--space-lg);
     font-size: 14px;
     font-weight: 500;
 }
 
 .message-box.error {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--accent-danger);
+    background: var(--danger-light);
+    color: var(--danger);
     border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .message-box.success {
-    background: rgba(34, 197, 94, 0.1);
-    color: var(--accent-success);
-    border: 1px solid rgba(34, 197, 94, 0.2);
+    background: var(--success-light);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .auth-form {
@@ -132,7 +110,7 @@ body {
 }
 
 .form-group {
-    margin-bottom: 18px;
+    margin-bottom: var(--space-md);
 }
 
 .form-group label {
@@ -140,25 +118,25 @@ body {
     font-size: 13px;
     font-weight: 500;
     color: var(--text-secondary);
-    margin-bottom: 6px;
+    margin-bottom: var(--space-xs);
 }
 
 .form-input {
     width: 100%;
-    padding: 12px 14px;
+    padding: var(--space-sm) var(--space-md);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-btn);
+    font-family: "Manrope", sans-serif;
     font-size: 15px;
-    font-family: inherit;
-    transition: all 0.2s;
-    background: var(--bg-surface);
     color: var(--text-primary);
+    background: var(--panel);
+    transition: all var(--transition-fast);
 }
 
 .form-input:focus {
     outline: none;
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px var(--accent-primary-light);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
 }
 
 .form-input::placeholder {
@@ -167,22 +145,23 @@ body {
 
 .btn-submit {
     width: 100%;
-    padding: 12px;
-    background: var(--accent-primary);
-    color: white;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--primary);
+    color: var(--text-inverse);
     border: none;
-    border-radius: var(--radius);
+    border-radius: var(--radius-btn);
+    font-family: "Manrope", sans-serif;
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
-    margin-top: 8px;
+    transition: all var(--transition-base);
+    margin-top: var(--space-xs);
 }
 
 .btn-submit:hover {
-    background: var(--accent-primary-hover);
+    background: var(--primary-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(26, 60, 110, 0.3);
+    box-shadow: 0 4px 12px rgba(21, 84, 161, 0.3);
 }
 
 .btn-submit:active {
@@ -196,20 +175,20 @@ body {
 }
 
 .form-footer {
-    margin-top: 18px;
+    margin-top: var(--space-md);
     text-align: center;
 }
 
 .forgot-link {
-    color: var(--accent-primary);
+    color: var(--primary);
     text-decoration: none;
     font-size: 14px;
     font-weight: 500;
-    transition: color 0.2s;
+    transition: color var(--transition-fast);
 }
 
 .forgot-link:hover {
-    color: var(--accent-primary-hover);
+    color: var(--primary-hover);
 }
 
 .terms-text {
@@ -230,7 +209,7 @@ body {
 }
 
 .btn-submit.loading::after {
-    content: '';
+    content: "";
     position: absolute;
     width: 20px;
     height: 20px;
@@ -244,14 +223,10 @@ body {
     animation: spin 0.6s linear infinite;
 }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
 /* Responsive */
 @media (max-width: 480px) {
     .auth-card {
-        padding: 24px 20px;
+        padding: var(--space-lg);
     }
 
     .brand {

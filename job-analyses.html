@@ -1,53 +1,70 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Job Analyses - Spec Analyzer</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <!-- Navigation -->
-    <header class="top-nav">
-        <div class="nav-container">
-            <div class="nav-left">
-                <a href="/dashboard.html" class="logo-link">
-                    🔨 <span>PM4Subs Spec Analyzer</span>
-                </a>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Job Analyses - PM4Subs</title>
+        <link
+            rel="icon"
+            href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
+        />
+        <!-- Google Fonts -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <!-- Navigation -->
+        <header class="top-nav-bar">
+            <div class="nav-container">
+                <div class="nav-left">
+                    <a href="/dashboard.html" class="logo-link">
+                        <span class="logo-text">PM4Subs</span>
+                        <span class="beta-pill">Beta</span>
+                    </a>
+                </div>
+                <div class="nav-right">
+                    <a href="/dashboard.html" class="nav-link-back"
+                        >Back to Dashboard</a
+                    >
+                    <span class="nav-user-email" id="navUserEmail"></span>
+                    <button class="btn-nav-logout" id="navLogoutBtn">
+                        Sign Out
+                    </button>
+                </div>
             </div>
-            <div class="nav-right">
-                <a href="/dashboard.html" class="nav-link">← Back to Dashboard</a>
-                <span class="user-email" id="navUserEmail"></span>
-                <button class="btn-logout" id="navLogoutBtn">Sign Out</button>
+        </header>
+
+        <div class="container" style="max-width: 1200px">
+            <!-- Page Header -->
+            <div class="page-header">
+                <div class="page-header-content">
+                    <h1 id="jobName">Loading...</h1>
+                    <p id="jobDetails">Past analyses for this job</p>
+                </div>
+                <button id="newAnalysisBtn" class="btn btn-primary">
+                    + New Analysis
+                </button>
+            </div>
+
+            <!-- Analyses List -->
+            <div id="analysesList" class="analyses-grid"></div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="empty-state" style="display: none">
+                <div class="empty-state-icon">📄</div>
+                <h3 class="empty-state-title">No analyses yet</h3>
+                <p class="empty-state-text">Upload a spec to get started</p>
+                <button class="btn btn-primary" onclick="startNewAnalysis()">
+                    + New Analysis
+                </button>
             </div>
         </div>
-    </header>
 
-    <div class="container" style="max-width: 1200px; margin: 40px auto; padding: 0 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <div>
-                <h1 id="jobName" style="margin: 0 0 10px 0;">Loading...</h1>
-                <p id="jobDetails" style="color: #666; margin: 0;">Past analyses for this job</p>
-            </div>
-            <button id="newAnalysisBtn" class="btn-primary">
-                + New Analysis
-            </button>
-        </div>
-
-        <!-- Analyses List -->
-        <div id="analysesList" class="analyses-grid"></div>
-
-        <!-- Empty State -->
-        <div id="emptyState" style="text-align: center; padding: 60px 20px; display: none;">
-            <div style="font-size: 48px; margin-bottom: 20px;">📄</div>
-            <h2 style="color: #666;">No analyses yet</h2>
-            <p style="color: #999; margin: 10px 0 20px 0;">Upload a spec to get started</p>
-            <button class="btn-primary" onclick="startNewAnalysis()">
-                + New Analysis
-            </button>
-        </div>
-    </div>
-
-    <script type="module" src="job-analyses.js"></script>
-</body>
+        <script type="module" src="job-analyses.js"></script>
+    </body>
 </html>

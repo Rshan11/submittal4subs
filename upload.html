@@ -3,16 +3,17 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Spec Analyzer | PM4Subs</title>
-        <script type="module" src="/auth-check.js"></script>
+        <title>Upload Spec - PM4Subs</title>
         <link
             rel="icon"
             href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
         />
+        <script type="module" src="/auth-check.js"></script>
+        <!-- Google Fonts -->
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="style.css" />
@@ -41,7 +42,7 @@
 
         <div class="container">
             <main>
-                <!-- Upload Section (Now First) -->
+                <!-- Upload Section -->
                 <section class="card" id="uploadSection">
                     <div class="card-header">
                         <h2>Upload Specification</h2>
@@ -99,7 +100,7 @@
                     </div>
                 </section>
 
-                <!-- Division Selection Section (shown after scan) -->
+                <!-- Division Selection Section -->
                 <section
                     class="card"
                     id="divisionSection"
@@ -115,71 +116,28 @@
                         >
                         <select id="divisionSelect" class="trade-select">
                             <option value="">Select a division...</option>
-                            <!-- Options populated dynamically after scan -->
                         </select>
 
-                        <!-- Section Preview (shown when division selected) -->
+                        <!-- Section Preview -->
                         <div
                             id="sectionPreview"
                             class="section-preview"
-                            style="
-                                display: none;
-                                margin-top: 16px;
-                                padding: 16px;
-                                background: #f8f9fa;
-                                border-radius: 8px;
-                            "
+                            style="display: none"
                         >
-                            <h4
-                                id="previewTitle"
-                                style="
-                                    margin: 0 0 12px 0;
-                                    font-size: 14px;
-                                    font-weight: 600;
-                                "
-                            ></h4>
-                            <ul
-                                id="previewSections"
-                                style="
-                                    margin: 0;
-                                    padding-left: 20px;
-                                    font-size: 13px;
-                                    color: #666;
-                                "
-                            ></ul>
+                            <h4 id="previewTitle"></h4>
+                            <ul id="previewSections"></ul>
                         </div>
 
                         <!-- Previous Analyses -->
-                        <div
-                            id="previousAnalyses"
-                            style="
-                                display: none;
-                                margin-top: 16px;
-                                padding: 16px;
-                                background: #f0f9ff;
-                                border-radius: 8px;
-                            "
-                        >
-                            <h4
-                                style="
-                                    margin: 0 0 12px 0;
-                                    font-size: 14px;
-                                    font-weight: 600;
-                                "
-                            >
-                                Previous Analyses
-                            </h4>
-                            <ul
-                                id="analysesList"
-                                style="
-                                    margin: 0;
-                                    padding-left: 20px;
-                                    font-size: 13px;
-                                "
-                            ></ul>
+                        <div id="previousAnalyses" style="display: none">
+                            <h4>Previous Analyses</h4>
+                            <ul id="analysesList"></ul>
                         </div>
 
-                        <div class="file-actions" style="margin-top: 16px">
+                        <div
+                            class="file-actions"
+                            style="margin-top: var(--space-md)"
+                        >
                             <button class="btn btn-primary" id="analyzeBtn">
                                 Analyze Division
                             </button>
@@ -188,11 +146,7 @@
                 </section>
 
                 <!-- Loading Section -->
-                <section
-                    class="card loading-card"
-                    id="loadingSection"
-                    style="display: none"
-                >
+                <section class="card" id="loadingSection" style="display: none">
                     <div class="card-body loading-body">
                         <div class="loading-spinner"></div>
                         <h2>Analyzing Specification</h2>
@@ -214,11 +168,7 @@
                 </section>
 
                 <!-- Results Section -->
-                <section
-                    class="card results-card"
-                    id="resultsSection"
-                    style="display: none"
-                >
+                <section class="card" id="resultsSection" style="display: none">
                     <div class="card-header results-header">
                         <h2>Analysis Complete</h2>
                         <div class="results-actions">
@@ -234,18 +184,12 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="results-content" id="resultsContent">
-                            <!-- Analysis results will be inserted here -->
-                        </div>
+                        <div class="results-content" id="resultsContent"></div>
                     </div>
                 </section>
 
                 <!-- Error Section -->
-                <section
-                    class="card error-card"
-                    id="errorSection"
-                    style="display: none"
-                >
+                <section class="card" id="errorSection" style="display: none">
                     <div class="card-body error-body">
                         <div class="error-icon">
                             <svg

@@ -1,120 +1,136 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Spec Analyzer</title>
-    <link rel="stylesheet" href="auth-style.css">
-</head>
-<body>
-    <div class="auth-container">
-        <div class="auth-card">
-            <div class="auth-header">
-                <h1 class="brand">PM4Subs</h1>
-                <p class="tagline">Construction spec analysis made simple</p>
-            </div>
-
-            <div class="auth-tabs">
-                <button class="auth-tab active" data-tab="login">Sign In</button>
-                <button class="auth-tab" data-tab="signup">Sign Up</button>
-            </div>
-
-            <!-- Error/Success Messages -->
-            <div id="messageBox" class="message-box" style="display: none;"></div>
-
-            <!-- Login Form -->
-            <form id="loginForm" class="auth-form">
-                <div class="form-group">
-                    <label for="loginEmail">Email</label>
-                    <input 
-                        type="email" 
-                        id="loginEmail" 
-                        class="form-input" 
-                        placeholder="your.email@company.com"
-                        required 
-                        autocomplete="email"
-                    />
-                </div>
-
-                <div class="form-group">
-                    <label for="loginPassword">Password</label>
-                    <input 
-                        type="password" 
-                        id="loginPassword" 
-                        class="form-input" 
-                        placeholder="••••••••"
-                        required
-                        autocomplete="current-password"
-                    />
-                </div>
-
-                <button type="submit" class="btn-submit" id="loginBtn">
-                    Sign In
-                </button>
-
-                <div class="form-footer">
-                    <a href="#" class="forgot-link">Forgot password?</a>
-                </div>
-            </form>
-
-            <!-- Signup Form -->
-            <form id="signupForm" class="auth-form" style="display: none;">
-                <div class="form-group">
-                    <label for="signupEmail">Email</label>
-                    <input 
-                        type="email" 
-                        id="signupEmail" 
-                        class="form-input" 
-                        placeholder="your.email@company.com"
-                        required
-                        autocomplete="email"
-                    />
-                </div>
-
-                <div class="form-group">
-                    <label for="signupPassword">Password</label>
-                    <input 
-                        type="password" 
-                        id="signupPassword" 
-                        class="form-input" 
-                        placeholder="••••••••"
-                        required
-                        autocomplete="new-password"
-                        minlength="6"
-                    />
-                </div>
-
-                <div class="form-group">
-                    <label for="signupPasswordConfirm">Confirm Password</label>
-                    <input 
-                        type="password" 
-                        id="signupPasswordConfirm" 
-                        class="form-input" 
-                        placeholder="••••••••"
-                        required
-                        autocomplete="new-password"
-                        minlength="6"
-                    />
-                </div>
-
-                <button type="submit" class="btn-submit" id="signupBtn">
-                    Create Account
-                </button>
-
-                <div class="form-footer">
-                    <p class="terms-text">
-                        By signing up, you agree to our Terms of Service
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Sign In - PM4Subs</title>
+        <link
+            rel="icon"
+            href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
+        />
+        <!-- Google Fonts -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="auth-style.css" />
+    </head>
+    <body>
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-header">
+                    <h1 class="brand">PM4Subs</h1>
+                    <p class="tagline">
+                        Construction spec analysis made simple
                     </p>
                 </div>
-            </form>
 
-            <!-- Beta Badge -->
-            <div class="beta-badge">
-                🎉 FREE BETA - No credit card required
+                <div class="auth-tabs">
+                    <button class="auth-tab active" data-tab="login">
+                        Sign In
+                    </button>
+                    <button class="auth-tab" data-tab="signup">Sign Up</button>
+                </div>
+
+                <!-- Error/Success Messages -->
+                <div
+                    id="messageBox"
+                    class="message-box"
+                    style="display: none"
+                ></div>
+
+                <!-- Login Form -->
+                <form id="loginForm" class="auth-form">
+                    <div class="form-group">
+                        <label for="loginEmail">Email</label>
+                        <input
+                            type="email"
+                            id="loginEmail"
+                            class="form-input"
+                            placeholder="your.email@company.com"
+                            required
+                            autocomplete="email"
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <input
+                            type="password"
+                            id="loginPassword"
+                            class="form-input"
+                            placeholder="Enter your password"
+                            required
+                            autocomplete="current-password"
+                        />
+                    </div>
+
+                    <button type="submit" class="btn-submit" id="loginBtn">
+                        Sign In
+                    </button>
+
+                    <div class="form-footer">
+                        <a href="#" class="forgot-link">Forgot password?</a>
+                    </div>
+                </form>
+
+                <!-- Signup Form -->
+                <form id="signupForm" class="auth-form" style="display: none">
+                    <div class="form-group">
+                        <label for="signupEmail">Email</label>
+                        <input
+                            type="email"
+                            id="signupEmail"
+                            class="form-input"
+                            placeholder="your.email@company.com"
+                            required
+                            autocomplete="email"
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signupPassword">Password</label>
+                        <input
+                            type="password"
+                            id="signupPassword"
+                            class="form-input"
+                            placeholder="Create a password"
+                            required
+                            autocomplete="new-password"
+                            minlength="6"
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signupPasswordConfirm"
+                            >Confirm Password</label
+                        >
+                        <input
+                            type="password"
+                            id="signupPasswordConfirm"
+                            class="form-input"
+                            placeholder="Confirm your password"
+                            required
+                            autocomplete="new-password"
+                            minlength="6"
+                        />
+                    </div>
+
+                    <button type="submit" class="btn-submit" id="signupBtn">
+                        Create Account
+                    </button>
+
+                    <div class="form-footer">
+                        <p class="terms-text">
+                            By signing up, you agree to our Terms of Service
+                        </p>
+                    </div>
+                </form>
             </div>
         </div>
-    </div>
 
-    <script type="module" src="/auth.js"></script>
-</body>
+        <script type="module" src="/auth.js"></script>
+    </body>
 </html>

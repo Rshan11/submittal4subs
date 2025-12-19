@@ -52,6 +52,7 @@ from analyzer import TRADE_CONFIGS, run_full_analysis
 from db import (
     create_spec,
     delete_divisions,
+    delete_job,
     delete_pages,
     delete_tiles,
     get_division_summary,
@@ -485,6 +486,49 @@ async def get_spec_divisions(spec_id: str):
             for d in divisions
         ],
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# DELETE /job/{job_id}
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.delete("/job/{job_id}")
+async def delete_job_endpoint(job_id: str, user_id: str):
+    """
+    Delete a job and all related data.
+
+    Cascades to delete:
+    - All specs for this job
+    - All spec_pages for those specs
+    - All spec_analyses for those specs
+
+    Requires user_id query param to verify ownership.
+    """
+    print(f"\n{'=' * 50}")
+    print(f"[DELETE] Deleting job: {job_id}")
+    print(f"[DELETE] User: {user_id}")
+    print(f"{'=' * 50}\n")
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    try:
+        success = delete_job(job_id, user_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=404, detail="Job not found or not owned by this user"
+            )
+
+        print(f"[DELETE] Successfully deleted job {job_id}")
+        return {"status": "deleted", "job_id": job_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[DELETE] ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ═══════════════════════════════════════════════════════════════
