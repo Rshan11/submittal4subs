@@ -193,36 +193,57 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
     header = text[:600].upper() if len(text) > 600 else text.upper()
     footer = text[-600:].upper() if len(text) > 600 else text.upper()
 
-    # Pattern 1: Footer with page number - most reliable
-    # Matches: "04 22 00 - 5", "042200 - 5", "04 22 00.13 - 5"
-    # The dash followed by page number distinguishes this from body text
-    footer_pattern = re.compile(
-        r"(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+    # Pattern 1a: Footer 6-digit format with spaces and page number
+    # Matches: "04 22 00 - 5", "04 22 00.13 - 5"
+    footer_6digit = re.compile(
+        r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
     )
 
-    match = footer_pattern.search(footer)
+    match = footer_6digit.search(footer)
     if match:
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            # Format section number with spaces
             section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
             if match.group(4):
                 section += f".{match.group(4)}"
             return section, div
 
-    # Pattern 2: Header with "SECTION" keyword
-    # Matches: "SECTION 04 22 00", "SECTION 042200"
-    header_pattern = re.compile(
-        r"SECTION\s+(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?"
+    # Pattern 1b: Footer 5-digit format (no spaces) with page number
+    # Matches: "04220 - 5" (older CSI format)
+    footer_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
+
+    match = footer_5digit.search(footer)
+    if match:
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            # Keep as 5-digit format
+            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            return section, div
+
+    # Pattern 2a: Header with "SECTION" keyword - 6-digit format
+    # Matches: "SECTION 04 22 00"
+    header_6digit = re.compile(
+        r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
     )
 
-    match = header_pattern.search(header)
+    match = header_6digit.search(header)
     if match:
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
             section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
             if match.group(4):
                 section += f".{match.group(4)}"
+            return section, div
+
+    # Pattern 2b: Header with "SECTION" keyword - 5-digit format
+    # Matches: "SECTION 04220"
+    header_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
+
+    match = header_5digit.search(header)
+    if match:
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
             return section, div
 
     return None, None
@@ -249,12 +270,12 @@ def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
     divisions = []
     seen = set()
 
-    # Footer pattern: section number followed by dash and page number
-    footer_pattern = re.compile(
-        r"(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+    # Footer 6-digit: "04 22 00 - 5"
+    footer_6digit = re.compile(
+        r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
     )
 
-    for match in footer_pattern.finditer(search_text):
+    for match in footer_6digit.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
             section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
@@ -264,17 +285,39 @@ def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
                 seen.add(section)
                 divisions.append((section, div))
 
-    # Header pattern: "SECTION XX XX XX"
-    header_pattern = re.compile(
-        r"SECTION\s+(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?"
+    # Footer 5-digit: "04220 - 5"
+    footer_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
+
+    for match in footer_5digit.finditer(search_text):
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            if section not in seen:
+                seen.add(section)
+                divisions.append((section, div))
+
+    # Header 6-digit: "SECTION 04 22 00"
+    header_6digit = re.compile(
+        r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
     )
 
-    for match in header_pattern.finditer(search_text):
+    for match in header_6digit.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
             section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
             if match.group(4):
                 section += f".{match.group(4)}"
+            if section not in seen:
+                seen.add(section)
+                divisions.append((section, div))
+
+    # Header 5-digit: "SECTION 04220"
+    header_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
+
+    for match in header_5digit.finditer(search_text):
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
             if section not in seen:
                 seen.add(section)
                 divisions.append((section, div))
