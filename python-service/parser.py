@@ -257,7 +257,7 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
         if match:
             div = match.group(1).zfill(2)
             if div in VALID_DIVISIONS and div not in ("00", "01"):
-            return f"{div} 00 00", div
+                return f"{div} 00 00", div
 
     return None, None
 
