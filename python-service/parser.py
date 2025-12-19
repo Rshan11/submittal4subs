@@ -173,83 +173,139 @@ def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
     return section_to_page
 
 
-def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str]]:
+def detect_spec_format(pages_sample: List[str]) -> str:
+    """
+    Scan first ~50 pages to detect the footer/header format used in this spec.
+
+    Returns the dominant format found:
+    - "5digit_page": "04220 - 1" (5-digit section with page number)
+    - "6digit_page": "04 22 00 - 1" (6-digit section with page number)
+    - "section_5digit": "SECTION 04220"
+    - "section_6digit": "SECTION 04 22 00"
+    - "none": No clear format detected
+    """
+    formats_found = {
+        "5digit_page": 0,  # "04220 - 1"
+        "6digit_page": 0,  # "04 22 00 - 1"
+        "section_5digit": 0,  # "SECTION 04220"
+        "section_6digit": 0,  # "SECTION 04 22 00"
+    }
+
+    # Patterns to detect each format
+    patterns = {
+        "5digit_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}"),
+        "6digit_page": re.compile(
+            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})\s*[-–—]\s*\d{1,3}"
+        ),
+        "section_5digit": re.compile(
+            r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})", re.IGNORECASE
+        ),
+        "section_6digit": re.compile(
+            r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})", re.IGNORECASE
+        ),
+    }
+
+    for text in pages_sample:
+        if not text:
+            continue
+        # Check both header and footer regions
+        header = text[:600].upper() if len(text) > 600 else text.upper()
+        footer = text[-600:].upper() if len(text) > 600 else text.upper()
+        search_text = header + "\n" + footer
+
+        for fmt, pattern in patterns.items():
+            if pattern.search(search_text):
+                formats_found[fmt] += 1
+
+    # Find the dominant format
+    if not any(formats_found.values()):
+        return "none"
+
+    best_format = max(formats_found, key=lambda k: formats_found[k])
+
+    print(f"[PARSE] Format detection: {formats_found}")
+    print(f"[PARSE] Using format: {best_format}")
+
+    return best_format if formats_found[best_format] > 0 else "none"
+
+
+def detect_division_from_content(
+    text: str, spec_format: str = "auto"
+) -> Tuple[Optional[str], Optional[str]]:
     """
     Detect section from page header/footer ONLY - not from body content.
 
-    This prevents false positives from cross-references like "see Section 04 22 00"
-    appearing in Concrete Repair (Division 03) pages.
+    Uses the pre-detected spec_format to apply only the matching pattern,
+    avoiding false positives from cross-references.
 
-    Only looks at:
-    1. Header (first 600 chars): "SECTION 04 22 00" or "SECTION 042200"
-    2. Footer (last 600 chars): "04 22 00 - 5" or "042200 - 5" (section - page#)
+    spec_format options:
+    - "5digit_page": "04220 - 1"
+    - "6digit_page": "04 22 00 - 1"
+    - "section_5digit": "SECTION 04220"
+    - "section_6digit": "SECTION 04 22 00"
+    - "auto": Try all patterns (legacy behavior)
+    - "none": No pattern detected, skip
 
     Returns: (section_number, division_code) or (None, None)
     """
     if not text or len(text) < 100:
         return None, None
 
+    if spec_format == "none":
+        return None, None
+
     # Check BOTH header (first 600 chars) and footer (last 600 chars)
     # PDF text extraction sometimes puts page footers at the START of text
     header = text[:600].upper() if len(text) > 600 else text.upper()
     footer = text[-600:].upper() if len(text) > 600 else text.upper()
-
-    # Combine both regions for searching - footer text may be in either location
     search_regions = [header, footer]
 
-    # Pattern 1a: 6-digit format with page number: "04 22 00 - 5"
-    pattern_6digit = re.compile(
-        r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
-    )
+    # Define patterns
+    patterns = {
+        "5digit_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}"),
+        "6digit_page": re.compile(
+            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+        ),
+        "section_5digit": re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})"),
+        "section_6digit": re.compile(
+            r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
+        ),
+    }
 
-    for region in search_regions:
-        match = pattern_6digit.search(region)
-        if match:
-            div = match.group(1)
-            if div in VALID_DIVISIONS and div not in ("00", "01"):
-                section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-                if match.group(4):
-                    section += f".{match.group(4)}"
-                return section, div
+    # If specific format detected, use only that pattern
+    if spec_format in patterns:
+        pattern = patterns[spec_format]
+        for region in search_regions:
+            match = pattern.search(region)
+            if match:
+                div = match.group(1)
+                if div in VALID_DIVISIONS and div not in ("00", "01"):
+                    if spec_format in ("5digit_page", "section_5digit"):
+                        section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+                    else:
+                        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+                        if match.group(4):
+                            section += f".{match.group(4)}"
+                    return section, div
+        return None, None
 
-    # Pattern 1b: 5-digit format with page number: "04220 - 5"
-    pattern_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
+    # "auto" mode - try all patterns (legacy behavior)
+    for fmt in ["6digit_page", "5digit_page", "section_6digit", "section_5digit"]:
+        pattern = patterns[fmt]
+        for region in search_regions:
+            match = pattern.search(region)
+            if match:
+                div = match.group(1)
+                if div in VALID_DIVISIONS and div not in ("00", "01"):
+                    if fmt in ("5digit_page", "section_5digit"):
+                        section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+                    else:
+                        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+                        if len(match.groups()) > 3 and match.group(4):
+                            section += f".{match.group(4)}"
+                    return section, div
 
-    for region in search_regions:
-        match = pattern_5digit.search(region)
-        if match:
-            div = match.group(1)
-            if div in VALID_DIVISIONS and div not in ("00", "01"):
-                section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-                return section, div
-
-    # Pattern 2a: "SECTION 04 22 00" header
-    pattern_section_6digit = re.compile(
-        r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
-    )
-
-    for region in search_regions:
-        match = pattern_section_6digit.search(region)
-        if match:
-            div = match.group(1)
-            if div in VALID_DIVISIONS and div not in ("00", "01"):
-                section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-                if match.group(4):
-                    section += f".{match.group(4)}"
-                return section, div
-
-    # Pattern 2b: "SECTION 04220" header
-    pattern_section_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
-
-    for region in search_regions:
-        match = pattern_section_5digit.search(region)
-        if match:
-            div = match.group(1)
-            if div in VALID_DIVISIONS and div not in ("00", "01"):
-                section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-                return section, div
-
-    # Pattern 3: "DIVISION XX" header
+    # Pattern 3: "DIVISION XX" header (fallback for division start pages)
     pattern_division = re.compile(r"DIVISION\s+(0?[1-9]|[1-4]\d)\b")
 
     for region in search_regions:
@@ -339,7 +395,7 @@ def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
 
 
 def assign_pages_from_outline(
-    pages: List[dict], outline_map: Dict[str, int]
+    pages: List[dict], outline_map: Dict[str, int], spec_format: str = "auto"
 ) -> List[dict]:
     """
     Use PDF outline mapping to assign section numbers to pages.
@@ -383,7 +439,9 @@ def assign_pages_from_outline(
         # ALWAYS scan page content for section headers
         # If content contains a clear section header (like "04 20 00 UNIT MASONRY")
         # that isn't in the outline, override the outline assignment
-        content_section, content_div = detect_division_from_content(page["content"])
+        content_section, content_div = detect_division_from_content(
+            page["content"], spec_format
+        )
         if content_div:
             # Check if this division is NOT in the outline
             outline_divisions = set(s[:2] for s in outline_map.keys())
@@ -925,9 +983,13 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
 
     print(f"[PARSE] Extracted {len(pages)} pages with content")
 
+    # DETECT SPEC FORMAT: Scan first 50 pages to determine footer/header format
+    sample_pages = [p["content"] for p in pages[:50]]
+    spec_format = detect_spec_format(sample_pages)
+
     # Apply TIER 0: PDF outline classification
     if outline_map:
-        pages = assign_pages_from_outline(pages, outline_map)
+        pages = assign_pages_from_outline(pages, outline_map, spec_format)
         outline_classified = sum(
             1 for p in pages if p.get("classification_method") == "outline"
         )
@@ -951,13 +1013,13 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     section_map, map_source = find_best_toc_map(pages, total_pages)
     apply_section_map(pages, section_map, map_source)
 
-    # TIER 2: For pages not classified, try footer pattern
+    # TIER 2: For pages not classified, try footer/header pattern with detected format
     for page in pages:
         if page["section_number"] is not None or page["division_code"] is not None:
             continue  # Already classified
 
-        # Try footer pattern
-        section, division = extract_section_from_footer(page["content"])
+        # Try footer/header pattern using detected spec format
+        section, division = detect_division_from_content(page["content"], spec_format)
         if section:
             page["section_number"] = section
             page["division_code"] = division
