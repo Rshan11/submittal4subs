@@ -962,6 +962,19 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         if not text or len(text.strip()) < 50:
             continue
 
+        # DEBUG: Log page 508 to see why pattern isn't matching
+        actual_page = page_num + 1
+        if actual_page == 508:
+            print(f"[DEBUG] Page 508 text length: {len(text)}")
+            print(f"[DEBUG] First 300 chars: {repr(text[:300])}")
+            # Try simple 5-digit pattern
+            simple_match = re.search(r"(\d{5})\s*[-–—]\s*\d+", text)
+            print(f"[DEBUG] Simple 5-digit match: {simple_match}")
+            if simple_match:
+                print(
+                    f"[DEBUG] Match at position: {simple_match.start()}, value: {simple_match.group()}"
+                )
+
         pages.append(
             {
                 "spec_id": spec_id,
