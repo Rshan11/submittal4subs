@@ -175,32 +175,54 @@ def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
 
 def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Check if page content contains a division header that should override bookmark.
+    Detect section from page header/footer ONLY - not from body content.
 
-    Looks for section headers like "SECTION 04 20 00" or "04 20 00 UNIT MASONRY"
-    anywhere in the page content (not just first 500 chars).
+    This prevents false positives from cross-references like "see Section 04 22 00"
+    appearing in Concrete Repair (Division 03) pages.
+
+    Only looks at:
+    1. Header (first 600 chars): "SECTION 04 22 00" or "SECTION 042200"
+    2. Footer (last 600 chars): "04 22 00 - 5" or "042200 - 5" (section - page#)
 
     Returns: (section_number, division_code) or (None, None)
     """
-    if not text:
+    if not text or len(text) < 100:
         return None, None
 
-    text_upper = text.upper()
+    # Check header (first 600 chars) and footer (last 600 chars)
+    header = text[:600].upper() if len(text) > 600 else text.upper()
+    footer = text[-600:].upper() if len(text) > 600 else text.upper()
 
-    # Pattern: Look for section numbers anywhere in page
-    # Matches: "SECTION 04 20 00", "04 20 00 UNIT MASONRY", etc.
-    pattern = re.compile(r"(?:SECTION\s+)?(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?")
+    # Pattern 1: Footer with page number - most reliable
+    # Matches: "04 22 00 - 5", "042200 - 5", "04 22 00.13 - 5"
+    # The dash followed by page number distinguishes this from body text
+    footer_pattern = re.compile(
+        r"(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+    )
 
-    # Find ALL section numbers on the page
-    matches = pattern.findall(text_upper)
-
-    # Filter to valid trade divisions (not 00 or 01)
-    for match in matches:
-        div = match[0]
+    match = footer_pattern.search(footer)
+    if match:
+        div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match[0]} {match[1]} {match[2]}"
-            if match[3]:
-                section += f".{match[3]}"
+            # Format section number with spaces
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
+
+    # Pattern 2: Header with "SECTION" keyword
+    # Matches: "SECTION 04 22 00", "SECTION 042200"
+    header_pattern = re.compile(
+        r"SECTION\s+(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?"
+    )
+
+    match = header_pattern.search(header)
+    if match:
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
             return section, div
 
     return None, None
@@ -208,28 +230,51 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
 
 def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
     """
-    Find ALL division references in page content.
-    Used for pages that contain multiple sections (like outline specs).
+    Find section identifiers in page header/footer ONLY.
+    Used for building division summary from pages that may not be in PDF outline.
+
+    Only looks at header/footer patterns, NOT body content, to avoid
+    false positives from cross-references.
 
     Returns: List of (section_number, division_code) tuples
     """
-    if not text:
+    if not text or len(text) < 100:
         return []
 
-    text_upper = text.upper()
-
-    pattern = re.compile(r"(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?")
-
-    matches = pattern.findall(text_upper)
+    # Only check header and footer regions
+    header = text[:600].upper() if len(text) > 600 else text.upper()
+    footer = text[-600:].upper() if len(text) > 600 else text.upper()
+    search_text = header + "\n" + footer
 
     divisions = []
     seen = set()
-    for match in matches:
-        div = match[0]
+
+    # Footer pattern: section number followed by dash and page number
+    footer_pattern = re.compile(
+        r"(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+    )
+
+    for match in footer_pattern.finditer(search_text):
+        div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match[0]} {match[1]} {match[2]}"
-            if match[3]:
-                section += f".{match[3]}"
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            if section not in seen:
+                seen.add(section)
+                divisions.append((section, div))
+
+    # Header pattern: "SECTION XX XX XX"
+    header_pattern = re.compile(
+        r"SECTION\s+(0[1-9]|[1-4]\d)\s*(\d{2})\s*(\d{2})(?:\.(\d+))?"
+    )
+
+    for match in header_pattern.finditer(search_text):
+        div = match.group(1)
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
             if section not in seen:
                 seen.add(section)
                 divisions.append((section, div))
