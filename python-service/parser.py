@@ -160,6 +160,37 @@ def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
     return section_to_page
 
 
+def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Check if page content contains a division header that should override bookmark.
+
+    Looks for section headers like "SECTION 04 20 00" or "04 20 00 UNIT MASONRY"
+    in the first 500 characters of the page.
+
+    Returns: (section_number, division_code) or (None, None)
+    """
+    if not text:
+        return None, None
+
+    header_text = text[:500].upper()
+
+    # Pattern: Look for section numbers at start of page
+    # Matches: "SECTION 04 20 00", "04 20 00 UNIT MASONRY", etc.
+    pattern = re.compile(r"(?:SECTION\s+)?(\d{2})\s+(\d{2})\s+(\d{2})(?:\.(\d+))?")
+
+    match = pattern.search(header_text)
+    if match:
+        div = match.group(1)
+        # Validate it's a real CSI division (not 00 which is procurement)
+        if div in VALID_DIVISIONS and div != "00":
+            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            if match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
+
+    return None, None
+
+
 def assign_pages_from_outline(
     pages: List[dict], outline_map: Dict[str, int]
 ) -> List[dict]:
@@ -168,6 +199,9 @@ def assign_pages_from_outline(
 
     Logic: If outline says section 04 22 00 starts on page 95,
     then pages 95+ are section 04 22 00 until the next section starts.
+
+    IMPORTANT: If outline assigns a generic section (like 00 10 XX),
+    we do a secondary content scan to find the real division.
     """
     if not outline_map:
         return pages
@@ -196,6 +230,17 @@ def assign_pages_from_outline(
             page["section_number"] = assigned_section
             page["division_code"] = assigned_section[:2]
             page["classification_method"] = "outline"
+
+            # OVERRIDE: If outline assigned a generic "00" or "01" section,
+            # scan page content for actual trade division
+            if assigned_section[:2] in ("00", "01"):
+                content_section, content_div = detect_division_from_content(
+                    page["content"]
+                )
+                if content_div:
+                    page["section_number"] = content_section
+                    page["division_code"] = content_div
+                    page["classification_method"] = "outline_content"
 
     return pages
 
