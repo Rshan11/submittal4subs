@@ -829,7 +829,7 @@ def classify_by_keywords(text: str) -> Optional[str]:
         return None
 
     # Return division with highest keyword match
-    best_division = max(keyword_scores, key=keyword_scores.get)
+    best_division = max(keyword_scores, key=lambda k: keyword_scores[k])
 
     # Only return if we have at least 2 keyword matches (confidence threshold)
     if keyword_scores[best_division] >= 2:
