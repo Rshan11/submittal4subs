@@ -1017,7 +1017,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     )
     unclassified = len(pages) - classified
 
-    print(f"[PARSE] Classification summary:")
+    print("[PARSE] Classification summary:")
     print(f"[PARSE]   Total pages: {len(pages)}")
     print(f"[PARSE]   Classified: {classified}")
     print(f"[PARSE]     - By PDF outline: {outline_classified}")
