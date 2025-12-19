@@ -379,10 +379,14 @@ def get_all_analyses(spec_id: str) -> List[Dict[str, Any]]:
 def delete_job(job_id: str, user_id: str) -> bool:
     """
     Delete a job and all related data.
-    Due to CASCADE deletes on foreign keys, this will also delete:
-    - All specs for this job
-    - All spec_pages for those specs
-    - All spec_analyses for those specs
+
+    Manually deletes in correct order to respect foreign key constraints:
+    1. spec_analyses (references job_id and spec_id)
+    2. spec_pages (references spec_id)
+    3. spec_divisions (references spec_id) - legacy
+    4. spec_tiles (references spec_id) - legacy
+    5. specs (references job_id)
+    6. jobs
 
     Returns True if successful, False if job not found or not owned by user.
     """
@@ -400,6 +404,36 @@ def delete_job(job_id: str, user_id: str) -> bool:
     if not result.data:
         return False
 
-    # Delete the job (cascades to specs, pages, analyses)
+    # Get all specs for this job (needed to delete related records)
+    specs_result = client.table("specs").select("id").eq("job_id", job_id).execute()
+    spec_ids = [s["id"] for s in (specs_result.data or [])]
+
+    print(f"[DB] Deleting job {job_id} with {len(spec_ids)} specs")
+
+    # Delete in order to respect foreign key constraints
+    # 1. Delete spec_analyses (has FK to both jobs and specs)
+    client.table("spec_analyses").delete().eq("job_id", job_id).execute()
+    print(f"[DB] Deleted spec_analyses for job {job_id}")
+
+    # 2. Delete spec_pages for each spec
+    for spec_id in spec_ids:
+        client.table("spec_pages").delete().eq("spec_id", spec_id).execute()
+    print(f"[DB] Deleted spec_pages for {len(spec_ids)} specs")
+
+    # 3. Delete spec_divisions (legacy) for each spec
+    for spec_id in spec_ids:
+        client.table("spec_divisions").delete().eq("spec_id", spec_id).execute()
+
+    # 4. Delete spec_tiles (legacy) for each spec
+    for spec_id in spec_ids:
+        client.table("spec_tiles").delete().eq("spec_id", spec_id).execute()
+
+    # 5. Delete specs
+    client.table("specs").delete().eq("job_id", job_id).execute()
+    print(f"[DB] Deleted specs for job {job_id}")
+
+    # 6. Delete the job itself
     client.table("jobs").delete().eq("id", job_id).execute()
+    print(f"[DB] Deleted job {job_id}")
+
     return True
