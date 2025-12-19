@@ -912,6 +912,14 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         if not text or len(text.strip()) < 50:
             continue
 
+        # DEBUG: Log specific pages to see footer format
+        actual_page = page_num + 1
+        if actual_page in [507, 508, 509, 510]:
+            footer = text[-300:] if len(text) > 300 else text
+            print(f"[DEBUG] Page {actual_page} last 300 chars:")
+            print(repr(footer))
+            print("---")
+
         pages.append(
             {
                 "spec_id": spec_id,
