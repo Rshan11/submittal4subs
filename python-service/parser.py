@@ -246,8 +246,10 @@ def assign_pages_from_outline(
     Logic: If outline says section 04 22 00 starts on page 95,
     then pages 95+ are section 04 22 00 until the next section starts.
 
-    IMPORTANT: If outline assigns a generic section (like 00 10 XX),
-    we do a secondary content scan to find the real division.
+    IMPORTANT: After outline assignment, we ALWAYS do a content scan.
+    If content has a section header (like "04 20 00 UNIT MASONRY") that
+    differs from the outline assignment, the content wins. This handles
+    "outline specs" where the PDF outline is incomplete.
     """
     if not outline_map:
         return pages
@@ -258,7 +260,7 @@ def assign_pages_from_outline(
     for page in pages:
         page_num = page["page_number"]
 
-        # Find which section this page belongs to
+        # Find which section this page belongs to based on outline
         assigned_section = None
         for i, (section, start_page) in enumerate(sorted_sections):
             if page_num >= start_page:
@@ -277,16 +279,26 @@ def assign_pages_from_outline(
             page["division_code"] = assigned_section[:2]
             page["classification_method"] = "outline"
 
-            # OVERRIDE: If outline assigned a generic "00" or "01" section,
-            # scan page content for actual trade division
-            if assigned_section[:2] in ("00", "01"):
-                content_section, content_div = detect_division_from_content(
-                    page["content"]
+        # ALWAYS scan page content for section headers
+        # If content contains a clear section header (like "04 20 00 UNIT MASONRY")
+        # that isn't in the outline, override the outline assignment
+        content_section, content_div = detect_division_from_content(page["content"])
+        if content_div:
+            # Check if this division is NOT in the outline
+            outline_divisions = set(s[:2] for s in outline_map.keys())
+            if content_div not in outline_divisions:
+                # This division isn't in the outline - content wins!
+                page["section_number"] = content_section
+                page["division_code"] = content_div
+                page["classification_method"] = "content_override"
+                print(
+                    f"[PARSE] Page {page_num}: Content override - found {content_section} (not in outline)"
                 )
-                if content_div:
-                    page["section_number"] = content_section
-                    page["division_code"] = content_div
-                    page["classification_method"] = "outline_content"
+            elif assigned_section and assigned_section[:2] in ("00", "01"):
+                # Outline assigned generic section but content has real trade division
+                page["section_number"] = content_section
+                page["division_code"] = content_div
+                page["classification_method"] = "outline_content"
 
     return pages
 
@@ -871,6 +883,12 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     outline_classified = sum(
         1 for p in pages if p.get("classification_method") == "outline"
     )
+    content_override_classified = sum(
+        1 for p in pages if p.get("classification_method") == "content_override"
+    )
+    outline_content_classified = sum(
+        1 for p in pages if p.get("classification_method") == "outline_content"
+    )
     toc_classified = sum(1 for p in pages if p.get("classification_method") == "toc")
     index_classified = sum(
         1 for p in pages if p.get("classification_method") == "index"
@@ -890,6 +908,8 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     print(f"[PARSE]   Total pages: {len(pages)}")
     print(f"[PARSE]   Classified: {classified}")
     print(f"[PARSE]     - By PDF outline: {outline_classified}")
+    print(f"[PARSE]     - By content override: {content_override_classified}")
+    print(f"[PARSE]     - By outline+content: {outline_content_classified}")
     print(f"[PARSE]     - By text TOC: {toc_classified}")
     print(f"[PARSE]     - By Index: {index_classified}")
     print(f"[PARSE]     - By footer: {footer_classified}")
@@ -958,6 +978,8 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             "total": len(pages),
             "classified": classified,
             "outline": outline_classified,
+            "content_override": content_override_classified,
+            "outline_content": outline_content_classified,
             "toc": toc_classified,
             "index": index_classified,
             "footer": footer_classified,
