@@ -126,6 +126,9 @@ def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
     already defined the exact page for each section.
 
     Returns: {"03 30 00": 70, "04 22 00": 95, ...}
+
+    NOTE: Returns empty dict if outline only contains generic sections
+    (Division 00/01) - these are "outline specs" that need content scanning.
     """
     toc = pdf.get_toc()
     if not toc:
@@ -157,6 +160,16 @@ def extract_pdf_outline(pdf: fitz.Document) -> Dict[str, int]:
             if section not in section_to_page:
                 section_to_page[section] = page
 
+    # VALIDATION: Check if outline has any real trade divisions
+    # If it's all Division 00/01, this is an "outline spec" - reject the outline
+    trade_divisions = [s for s in section_to_page.keys() if s[:2] not in ("00", "01")]
+    if not trade_divisions:
+        print(
+            "[PARSE] PDF outline only contains Division 00/01 - skipping outline, will use content scan"
+        )
+        return {}
+
+    print(f"[PARSE] PDF outline has {len(trade_divisions)} trade divisions")
     return section_to_page
 
 
