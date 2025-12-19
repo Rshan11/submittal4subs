@@ -246,6 +246,16 @@ def detect_division_from_content(text: str) -> Tuple[Optional[str], Optional[str
             section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
             return section, div
 
+    # Pattern 3: "DIVISION XX" header (division start pages)
+    # Matches: "DIVISION 04", "DIVISION 4 -", "DIVISION 04 - MASONRY"
+    division_header = re.compile(r"DIVISION\s+(0?[1-9]|[1-4]\d)\b")
+
+    match = division_header.search(header)
+    if match:
+        div = match.group(1).zfill(2)  # Pad single digit to 2 digits
+        if div in VALID_DIVISIONS and div not in ("00", "01"):
+            return f"{div} 00 00", div
+
     return None, None
 
 
@@ -938,7 +948,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     section_map, map_source = find_best_toc_map(pages, total_pages)
     apply_section_map(pages, section_map, map_source)
 
-    # TIER 2 & 3: For pages not classified, try footer then keywords
+    # TIER 2: For pages not classified, try footer pattern
     for page in pages:
         if page["section_number"] is not None or page["division_code"] is not None:
             continue  # Already classified
@@ -949,13 +959,25 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             page["section_number"] = section
             page["division_code"] = division
             page["classification_method"] = "footer"
-            continue
 
-        # Try keyword fallback
-        division = classify_by_keywords(page["content"])
-        if division:
-            page["division_code"] = division
-            page["classification_method"] = "keyword"
+    # TIER 3: Inherit from previous page (section continuity)
+    # If a page has no classification but the previous page does,
+    # it's likely a continuation of the same section
+    prev_section = None
+    prev_division = None
+    for page in pages:
+        if page["division_code"] is not None:
+            # This page is classified - remember it for next page
+            prev_section = page.get("section_number")
+            prev_division = page["division_code"]
+        elif prev_division is not None:
+            # This page is unclassified but previous was - inherit
+            page["section_number"] = prev_section
+            page["division_code"] = prev_division
+            page["classification_method"] = "inherit"
+
+    # NOTE: Keyword fallback disabled - causes too many false positives
+    # (e.g., Concrete Repair mentioning "masonry" gets tagged as Div 04)
 
     # Extract cross-references for all pages
     for page in pages:
@@ -984,8 +1006,8 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     footer_classified = sum(
         1 for p in pages if p.get("classification_method") == "footer"
     )
-    keyword_classified = sum(
-        1 for p in pages if p.get("classification_method") == "keyword"
+    inherit_classified = sum(
+        1 for p in pages if p.get("classification_method") == "inherit"
     )
     toc_page_classified = sum(
         1 for p in pages if p.get("classification_method") == "toc_page"
@@ -1001,7 +1023,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     print(f"[PARSE]     - By text TOC: {toc_classified}")
     print(f"[PARSE]     - By Index: {index_classified}")
     print(f"[PARSE]     - By footer: {footer_classified}")
-    print(f"[PARSE]     - By keyword: {keyword_classified}")
+    print(f"[PARSE]     - By inherit: {inherit_classified}")
     print(f"[PARSE]     - TOC/index pages (Div 00): {toc_page_classified}")
     print(f"[PARSE]   Unclassified: {unclassified}")
 
@@ -1071,7 +1093,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             "toc": toc_classified,
             "index": index_classified,
             "footer": footer_classified,
-            "keyword": keyword_classified,
+            "inherit": inherit_classified,
             "toc_page": toc_page_classified,
             "unclassified": unclassified,
         },
