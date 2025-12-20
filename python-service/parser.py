@@ -178,29 +178,31 @@ def detect_spec_format(pages_sample: List[str]) -> str:
     Scan first ~50 pages to detect the footer/header format used in this spec.
 
     Returns the dominant format found:
-    - "5digit_page": "04220 - 1" (5-digit section with page number)
-    - "6digit_page": "04 22 00 - 1" (6-digit section with page number)
-    - "section_5digit": "SECTION 04220"
-    - "section_6digit": "SECTION 04 22 00"
+    - "compact_page": "04220 - 1" or "042200 - 1" (5 or 6 digit, no spaces)
+    - "spaced_page": "04 22 00 - 1" (with spaces)
+    - "section_compact": "SECTION 04220" or "SECTION 042200"
+    - "section_spaced": "SECTION 04 22 00"
     - "none": No clear format detected
     """
     formats_found = {
-        "5digit_page": 0,  # "04220 - 1"
-        "6digit_page": 0,  # "04 22 00 - 1"
-        "section_5digit": 0,  # "SECTION 04220"
-        "section_6digit": 0,  # "SECTION 04 22 00"
+        "compact_page": 0,  # "04220 - 1" or "042200 - 1" (no spaces)
+        "spaced_page": 0,  # "04 22 00 - 1" (with spaces)
+        "section_compact": 0,  # "SECTION 04220" or "SECTION 042200"
+        "section_spaced": 0,  # "SECTION 04 22 00"
     }
 
-    # Patterns to detect each format
+    # Patterns to detect each format - more flexible
+    # Compact: 5 or 6 digits with no spaces before the dash
+    # Spaced: digits separated by spaces
     patterns = {
-        "5digit_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}"),
-        "6digit_page": re.compile(
-            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})\s*[-–—]\s*\d{1,3}"
+        "compact_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{3,4})\s*[-–—]\s*\d{1,3}"),
+        "spaced_page": re.compile(
+            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s*(\d{2})?\s*[-–—]\s*\d{1,3}"
         ),
-        "section_5digit": re.compile(
-            r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})", re.IGNORECASE
+        "section_compact": re.compile(
+            r"SECTION\s+(0[1-9]|[1-4]\d)(\d{3,4})\b", re.IGNORECASE
         ),
-        "section_6digit": re.compile(
+        "section_spaced": re.compile(
             r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})", re.IGNORECASE
         ),
     }
@@ -239,10 +241,10 @@ def detect_division_from_content(
     avoiding false positives from cross-references.
 
     spec_format options:
-    - "5digit_page": "04220 - 1"
-    - "6digit_page": "04 22 00 - 1"
-    - "section_5digit": "SECTION 04220"
-    - "section_6digit": "SECTION 04 22 00"
+    - "compact_page": "04220 - 1" or "042200 - 1" (no spaces)
+    - "spaced_page": "04 22 00 - 1" (with spaces)
+    - "section_compact": "SECTION 04220" or "SECTION 042200"
+    - "section_spaced": "SECTION 04 22 00"
     - "auto": Try all patterns (legacy behavior)
     - "none": No pattern detected, skip
 
@@ -260,17 +262,45 @@ def detect_division_from_content(
     footer = text[-600:].upper() if len(text) > 600 else text.upper()
     search_regions = [header, footer]
 
-    # Define patterns
+    # Define patterns - flexible to handle various real-world formats
+    # Compact: 5-6 digits no spaces (04220, 042200)
+    # Spaced: digits with spaces (04 22 00, 04 22 0)
     patterns = {
-        "5digit_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}"),
-        "6digit_page": re.compile(
-            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+        "compact_page": re.compile(r"(0[1-9]|[1-4]\d)(\d{3,4})\s*[-–—]\s*\d{1,3}"),
+        "spaced_page": re.compile(
+            r"(0[1-9]|[1-4]\d)\s+(\d{2})\s*(\d{2})?(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
         ),
-        "section_5digit": re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})"),
-        "section_6digit": re.compile(
+        "section_compact": re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{3,4})\b"),
+        "section_spaced": re.compile(
             r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
         ),
     }
+
+    def extract_section(match, fmt):
+        """Extract section number from match based on format type."""
+        div = match.group(1)
+        if div not in VALID_DIVISIONS or div in ("00", "01"):
+            return None, None
+
+        if fmt in ("compact_page", "section_compact"):
+            # Compact format: div + remaining digits (e.g., "04" + "220" or "04" + "2200")
+            rest = match.group(2)
+            # Normalize to 6-digit format with spaces for consistency
+            if len(rest) == 3:
+                # 5-digit: 04220 -> 04 22 0 (but store as 04 22 00 padded)
+                section = f"{div} {rest[:2]} {rest[2:]}0"
+            else:
+                # 6-digit: 042200 -> 04 22 00
+                section = f"{div} {rest[:2]} {rest[2:]}"
+            return section, div
+        else:
+            # Spaced format: already has spaces
+            g2 = match.group(2) or "00"
+            g3 = match.group(3) or "00"
+            section = f"{div} {g2} {g3}"
+            if len(match.groups()) > 3 and match.group(4):
+                section += f".{match.group(4)}"
+            return section, div
 
     # If specific format detected, use only that pattern
     if spec_format in patterns:
@@ -278,31 +308,19 @@ def detect_division_from_content(
         for region in search_regions:
             match = pattern.search(region)
             if match:
-                div = match.group(1)
-                if div in VALID_DIVISIONS and div not in ("00", "01"):
-                    if spec_format in ("5digit_page", "section_5digit"):
-                        section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-                    else:
-                        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-                        if match.group(4):
-                            section += f".{match.group(4)}"
+                section, div = extract_section(match, spec_format)
+                if section:
                     return section, div
         return None, None
 
     # "auto" mode - try all patterns (legacy behavior)
-    for fmt in ["6digit_page", "5digit_page", "section_6digit", "section_5digit"]:
+    for fmt in ["spaced_page", "compact_page", "section_spaced", "section_compact"]:
         pattern = patterns[fmt]
         for region in search_regions:
             match = pattern.search(region)
             if match:
-                div = match.group(1)
-                if div in VALID_DIVISIONS and div not in ("00", "01"):
-                    if fmt in ("5digit_page", "section_5digit"):
-                        section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
-                    else:
-                        section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
-                        if len(match.groups()) > 3 and match.group(4):
-                            section += f".{match.group(4)}"
+                section, div = extract_section(match, fmt)
+                if section:
                     return section, div
 
     # Pattern 3: "DIVISION XX" header (fallback for division start pages)
@@ -339,38 +357,52 @@ def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
     divisions = []
     seen = set()
 
-    # Footer 6-digit: "04 22 00 - 5"
-    footer_6digit = re.compile(
-        r"(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
+    def normalize_section(div: str, rest: str) -> str:
+        """Normalize section to spaced 6-digit format."""
+        # rest could be 3 digits (220) or 4 digits (2200)
+        if len(rest) == 3:
+            return f"{div} {rest[:2]} {rest[2:]}0"
+        elif len(rest) == 4:
+            return f"{div} {rest[:2]} {rest[2:]}"
+        else:
+            return f"{div} {rest[:2]} {rest[2:4]}"
+
+    # Spaced format: "04 22 00 - 5" or "04 22 0 - 5"
+    spaced_pattern = re.compile(
+        r"(0[1-9]|[1-4]\d)\s+(\d{2})\s*(\d{1,2})?(?:\.(\d+))?\s*[-–—]\s*\d{1,3}"
     )
 
-    for match in footer_6digit.finditer(search_text):
+    for match in spaced_pattern.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
+            g2 = match.group(2) or "00"
+            g3 = match.group(3) or "00"
+            if len(g3) == 1:
+                g3 = g3 + "0"
+            section = f"{div} {g2} {g3}"
             if match.group(4):
                 section += f".{match.group(4)}"
             if section not in seen:
                 seen.add(section)
                 divisions.append((section, div))
 
-    # Footer 5-digit: "04220 - 5"
-    footer_5digit = re.compile(r"(0[1-9]|[1-4]\d)(\d{2})(\d{2})\s*[-–—]\s*\d{1,3}")
+    # Compact format: "04220 - 5" or "042200 - 5" (5 or 6 digits, no spaces)
+    compact_pattern = re.compile(r"(0[1-9]|[1-4]\d)(\d{3,4})\s*[-–—]\s*\d{1,3}")
 
-    for match in footer_5digit.finditer(search_text):
+    for match in compact_pattern.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            section = normalize_section(div, match.group(2))
             if section not in seen:
                 seen.add(section)
                 divisions.append((section, div))
 
-    # Header 6-digit: "SECTION 04 22 00"
-    header_6digit = re.compile(
+    # SECTION header spaced: "SECTION 04 22 00"
+    section_spaced = re.compile(
         r"SECTION\s+(0[1-9]|[1-4]\d)\s+(\d{2})\s+(\d{2})(?:\.(\d+))?"
     )
 
-    for match in header_6digit.finditer(search_text):
+    for match in section_spaced.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
             section = f"{match.group(1)} {match.group(2)} {match.group(3)}"
@@ -380,13 +412,13 @@ def detect_all_divisions_from_content(text: str) -> List[Tuple[str, str]]:
                 seen.add(section)
                 divisions.append((section, div))
 
-    # Header 5-digit: "SECTION 04220"
-    header_5digit = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{2})(\d{2})")
+    # SECTION header compact: "SECTION 04220" or "SECTION 042200"
+    section_compact = re.compile(r"SECTION\s+(0[1-9]|[1-4]\d)(\d{3,4})\b")
 
-    for match in header_5digit.finditer(search_text):
+    for match in section_compact.finditer(search_text):
         div = match.group(1)
         if div in VALID_DIVISIONS and div not in ("00", "01"):
-            section = f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            section = normalize_section(div, match.group(2))
             if section not in seen:
                 seen.add(section)
                 divisions.append((section, div))
@@ -961,19 +993,6 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         # Skip blank/nearly blank pages
         if not text or len(text.strip()) < 50:
             continue
-
-        # DEBUG: Log page 508 to see why pattern isn't matching
-        actual_page = page_num + 1
-        if actual_page == 508:
-            print(f"[DEBUG] Page 508 text length: {len(text)}")
-            print(f"[DEBUG] First 300 chars: {repr(text[:300])}")
-            # Try simple 5-digit pattern
-            simple_match = re.search(r"(\d{5})\s*[-–—]\s*\d+", text)
-            print(f"[DEBUG] Simple 5-digit match: {simple_match}")
-            if simple_match:
-                print(
-                    f"[DEBUG] Match at position: {simple_match.start()}, value: {simple_match.group()}"
-                )
 
         pages.append(
             {
