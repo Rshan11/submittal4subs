@@ -55,6 +55,8 @@ from db import (
     delete_job,
     delete_pages,
     delete_tiles,
+    get_all_analyses,
+    get_analysis,
     get_division_summary,
     get_pages_by_division,
     get_pages_by_section,
@@ -454,6 +456,75 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# GET /spec/{spec_id}/analyses - Get all saved analyses for a spec
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.get("/spec/{spec_id}/analyses")
+async def get_spec_analyses(spec_id: str):
+    """
+    Get all saved analyses for a spec.
+    Returns list of analyses with division code, timestamp, and summary.
+    """
+    spec = get_spec(spec_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail="Spec not found")
+
+    analyses = get_all_analyses(spec_id)
+
+    return {
+        "spec_id": spec_id,
+        "count": len(analyses),
+        "analyses": [
+            {
+                "id": a["id"],
+                "division_code": a["division_code"],
+                "analysis_type": a["analysis_type"],
+                "created_at": a["created_at"],
+                "processing_time_ms": a["processing_time_ms"],
+                "result": a["result"],
+            }
+            for a in analyses
+        ],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# GET /spec/{spec_id}/analysis/{division} - Get specific division analysis
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.get("/spec/{spec_id}/analysis/{division}")
+async def get_division_analysis(spec_id: str, division: str):
+    """
+    Get saved analysis for a specific division.
+    Returns the most recent analysis for that division.
+    """
+    division = division.zfill(2)  # Ensure 2-digit format
+
+    spec = get_spec(spec_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail="Spec not found")
+
+    analysis = get_analysis(spec_id, division)
+
+    if not analysis:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No analysis found for Division {division}. Run /analyze/{spec_id} first.",
+        )
+
+    return {
+        "spec_id": spec_id,
+        "division_code": division,
+        "id": analysis["id"],
+        "created_at": analysis["created_at"],
+        "processing_time_ms": analysis["processing_time_ms"],
+        "result": analysis["result"],
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
