@@ -188,6 +188,65 @@ def get_division_summary(spec_id: str) -> List[Dict[str, Any]]:
     return result_list
 
 
+def get_sections_for_division(spec_id: str, division_code: str) -> List[Dict[str, Any]]:
+    """
+    Get all sections within a division, with page counts and content.
+    Used for section-by-section analysis of large divisions.
+
+    Returns list of dicts with:
+    - section_number: e.g., "23 05 15"
+    - page_count: number of pages in this section
+    - pages: list of page numbers
+    - content: concatenated text content from all pages
+    """
+    client = get_supabase()
+
+    # Get all pages for this division, grouped by section
+    result = (
+        client.table("spec_pages")
+        .select("section_number, page_number, content")
+        .eq("spec_id", spec_id)
+        .eq("division_code", division_code)
+        .not_.is_("section_number", "null")
+        .order("section_number")
+        .order("page_number")
+        .execute()
+    )
+
+    if not result.data:
+        return []
+
+    # Group by section
+    sections = {}
+    for row in result.data:
+        section = row["section_number"]
+        if section not in sections:
+            sections[section] = {
+                "section_number": section,
+                "pages": [],
+                "content_parts": [],
+            }
+        sections[section]["pages"].append(row["page_number"])
+        sections[section]["content_parts"].append(
+            f"--- Page {row['page_number']} ---\n{row['content']}"
+        )
+
+    # Build final list
+    result_list = []
+    for section_num in sorted(sections.keys()):
+        info = sections[section_num]
+        result_list.append(
+            {
+                "section_number": section_num,
+                "page_count": len(info["pages"]),
+                "pages": info["pages"],
+                "content": "\n\n".join(info["content_parts"]),
+            }
+        )
+
+    return result_list
+
+
 # ═══════════════════════════════════════════════════════════════
 # SPEC_DIVISIONS TABLE (LEGACY - kept for compatibility)
 # ═══════════════════════════════════════════════════════════════

@@ -2333,3 +2333,217 @@ DIVISION_PROMPTS = {
     "27": ELECTRICAL_SUMMARIZE_PROMPT,
     "28": ELECTRICAL_SUMMARIZE_PROMPT,
 }
+
+
+# ═══════════════════════════════════════════════════════════════
+# SECTION-LEVEL EXTRACTION PROMPTS
+# For large divisions processed section-by-section
+# ═══════════════════════════════════════════════════════════════
+
+SECTION_EXTRACT_PROMPT = """You are extracting specification data from a SINGLE SECTION of a construction spec.
+
+SECTION: {section_number} - {section_title}
+PAGES: {page_count}
+
+Extract ALL specific data from this section. Be thorough - do not summarize or skip details.
+
+Return a JSON object with ONLY the categories that apply to this section:
+
+{{
+  "section": "{section_number}",
+  "section_title": "{section_title}",
+
+  "equipment": [
+    {{
+      "tag": "equipment tag if shown",
+      "type": "equipment type",
+      "manufacturer": "manufacturer name",
+      "model": "model number if specified",
+      "capacity": "CFM, MBH, tons, GPM, HP, etc.",
+      "voltage": "voltage if specified",
+      "notes": "any critical notes"
+    }}
+  ],
+
+  "materials": [
+    {{
+      "item": "material name",
+      "type": "pipe/duct/insulation/etc.",
+      "specification": "ASTM, gauge, size, etc.",
+      "manufacturer": "if specified",
+      "notes": "joining method, special requirements"
+    }}
+  ],
+
+  "manufacturers": [
+    {{
+      "product": "product category",
+      "manufacturer": "manufacturer name",
+      "model": "model/product line if specified",
+      "basis_of_design": true/false,
+      "or_equal": true/false
+    }}
+  ],
+
+  "submittals": [
+    "submittal requirement 1",
+    "submittal requirement 2"
+  ],
+
+  "testing": [
+    "testing requirement 1",
+    "testing requirement 2"
+  ],
+
+  "coordination": [
+    {{
+      "with_trade": "Division XX - Trade Name",
+      "item": "what needs to be coordinated"
+    }}
+  ],
+
+  "controls": {{
+    "bas_manufacturer": "if specified",
+    "protocol": "BACnet/LON/Modbus/etc.",
+    "points": "point count if noted",
+    "sequences": ["sequence description 1", "sequence description 2"]
+  }},
+
+  "warranties": [
+    {{
+      "item": "what is warranted",
+      "duration": "warranty period",
+      "type": "manufacturer/contractor/extended"
+    }}
+  ],
+
+  "premium_items": [
+    {{
+      "item": "item description",
+      "reason": "why it costs more than standard"
+    }}
+  ]
+}}
+
+RULES:
+1. Only include categories that have actual data in this section
+2. Extract SPECIFIC values - model numbers, capacities, sizes, manufacturers
+3. Do not guess or infer - only extract what is explicitly stated
+4. If a manufacturer is "Basis of Design", note it
+5. Include tag numbers for equipment when shown
+6. Return valid JSON only - no markdown, no explanation text"""
+
+
+SECTION_COMBINE_PROMPT = """You are combining extraction results from multiple specification sections into a unified bid summary.
+
+TRADE: {trade_name}
+DIVISION: {division}
+SECTIONS ANALYZED: {section_count}
+
+SECTION EXTRACTION RESULTS:
+{section_results}
+
+YOUR TASK:
+Combine all section extractions into a single unified summary. You must:
+
+1. MERGE equipment lists - combine all equipment into one list, organized by type
+2. DEDUPE manufacturers - list each manufacturer once with all their specified products
+3. CONSOLIDATE materials - combine material specs, note any conflicts
+4. AGGREGATE coordination items - combine all coordination requirements
+5. COMBINE testing/commissioning requirements
+6. FLAG any CONFLICTS between sections (e.g., two different specs for same item)
+7. IDENTIFY GAPS - equipment referenced in one section but not scheduled elsewhere
+
+Return a comprehensive JSON summary:
+
+{{
+  "division": "{division}",
+  "trade": "{trade_name}",
+  "sections_analyzed": {section_count},
+
+  "equipment_summary": {{
+    "air_handling": [...],
+    "heating": [...],
+    "cooling": [...],
+    "pumps": [...],
+    "fans": [...],
+    "terminal_units": [...],
+    "other": [...]
+  }},
+
+  "all_manufacturers": [
+    {{
+      "manufacturer": "name",
+      "products": ["product 1", "product 2"],
+      "basis_of_design_for": ["product list"],
+      "or_equal_allowed": true/false
+    }}
+  ],
+
+  "materials_summary": {{
+    "piping": [...],
+    "ductwork": [...],
+    "insulation": [...],
+    "other": [...]
+  }},
+
+  "controls_summary": {{
+    "bas": "manufacturer and protocol",
+    "total_points": "if determinable",
+    "key_sequences": [...]
+  }},
+
+  "all_coordination": [
+    {{
+      "trade": "Division XX",
+      "items": ["item 1", "item 2"]
+    }}
+  ],
+
+  "all_testing": [...],
+
+  "all_warranties": [...],
+
+  "all_premium_items": [...],
+
+  "conflicts_found": [
+    {{
+      "item": "what conflicts",
+      "sections": ["section 1", "section 2"],
+      "values": ["value in section 1", "value in section 2"]
+    }}
+  ],
+
+  "gaps_identified": [
+    "equipment or item referenced but not fully specified"
+  ]
+}}
+
+RULES:
+1. Preserve ALL specific data - model numbers, capacities, manufacturers
+2. Group equipment logically by type
+3. Explicitly flag conflicts - don't just pick one value
+4. Return valid JSON only"""
+
+
+def get_section_extract_prompt(
+    section_number: str, section_title: str, page_count: int
+) -> str:
+    """Get the section extraction prompt with variables filled in."""
+    return SECTION_EXTRACT_PROMPT.format(
+        section_number=section_number,
+        section_title=section_title or "Untitled Section",
+        page_count=page_count,
+    )
+
+
+def get_section_combine_prompt(
+    trade_name: str, division: str, section_count: int, section_results: str
+) -> str:
+    """Get the section combine prompt with variables filled in."""
+    return SECTION_COMBINE_PROMPT.format(
+        trade_name=trade_name,
+        division=division,
+        section_count=section_count,
+        section_results=section_results,
+    )

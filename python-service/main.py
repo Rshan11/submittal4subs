@@ -48,7 +48,12 @@ if not os.getenv("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = get_env("OPENAI_API_KEY")
 
 # Import our modules
-from analyzer import TRADE_CONFIGS, run_full_analysis
+from analyzer import (
+    TRADE_CONFIGS,
+    analyze_division_by_section,
+    run_full_analysis,
+    should_use_section_analysis,
+)
 from db import (
     create_spec,
     delete_divisions,
@@ -60,6 +65,7 @@ from db import (
     get_division_summary,
     get_pages_by_division,
     get_pages_by_section,
+    get_sections_for_division,
     get_spec,
     insert_analysis,
     insert_pages_batch,
@@ -326,6 +332,8 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
 
     Page-Level Architecture:
     - Fetches all pages tagged with the requested division_code
+    - For large divisions (100+ pages with multiple sections): uses section-by-section analysis
+    - For smaller divisions: uses single-pass analysis
     - Collects cross-references from those pages
     - Fetches cross-referenced pages (limited to top 10 sections)
     - Runs Gemini extraction + OpenAI summary
@@ -373,58 +381,116 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
 
         print(f"[ANALYZE] Found {len(division_pages)} pages")
 
-        # Collect cross-references from those pages
-        all_cross_refs = set()
-        for page in division_pages:
-            refs = page.get("cross_refs") or []
-            all_cross_refs.update(refs)
+        # Get sections for this division (for section-by-section check)
+        sections = get_sections_for_division(spec_id, division)
+        section_count = len(sections)
+        page_count = len(division_pages)
 
-        # Filter to external refs only (not same division)
-        external_refs = [r for r in all_cross_refs if not r.startswith(division)]
-        print(f"[ANALYZE] Found {len(external_refs)} cross-referenced sections")
-
-        # Fetch cross-referenced pages (limit to top 10 to avoid token explosion)
-        cross_ref_pages = []
-        for ref in sorted(external_refs)[:10]:
-            ref_pages = get_pages_by_section(spec_id, ref)
-            cross_ref_pages.extend(ref_pages)
-
-        if cross_ref_pages:
-            print(f"[ANALYZE] Fetched {len(cross_ref_pages)} cross-ref pages")
-
-        # Build division text from pages
-        division_text = "\n\n".join(
-            [
-                f"--- Page {p['page_number']} (Section {p['section_number'] or 'unknown'}) ---\n{p['content']}"
-                for p in sorted(division_pages, key=lambda x: x["page_number"])
-            ]
+        print(
+            f"[ANALYZE] Division has {section_count} sections across {page_count} pages"
         )
-        print(f"[ANALYZE] Division text: {len(division_text):,} chars")
 
-        # Get Division 00/01 for contract terms
-        div01_text = None
-        if request.include_contract_terms:
-            div00_pages = get_pages_by_division(spec_id, "00")
-            div01_pages = get_pages_by_division(spec_id, "01")
-            contract_pages = div00_pages + div01_pages
+        # Decide: section-by-section or single-pass?
+        use_section_analysis = should_use_section_analysis(page_count, section_count)
 
-            if contract_pages:
-                div01_text = "\n\n".join(
-                    [
-                        f"--- Page {p['page_number']} ---\n{p['content']}"
-                        for p in sorted(contract_pages, key=lambda x: x["page_number"])
-                    ]
-                )
-                print(f"[ANALYZE] Contract text: {len(div01_text):,} chars")
+        if use_section_analysis:
+            print(f"[ANALYZE] Using SECTION-BY-SECTION analysis (large division)")
+            print(
+                f"[ANALYZE] Sections to analyze: {[s['section_number'] for s in sections]}"
+            )
 
-        # Run AI analysis
-        print("[ANALYZE] Running AI analysis...")
-        analysis_result = await run_full_analysis(
-            division_text=division_text,
-            div01_text=div01_text,
-            trade=trade,
-            project_name=request.project_name,
-        )
+            # Run section-by-section analysis
+            analysis_result = await analyze_division_by_section(
+                sections=sections,
+                trade=trade,
+                division=division,
+                project_name=request.project_name,
+            )
+
+            # Add contract terms analysis if requested
+            if request.include_contract_terms:
+                div00_pages = get_pages_by_division(spec_id, "00")
+                div01_pages = get_pages_by_division(spec_id, "01")
+                contract_pages = div00_pages + div01_pages
+
+                if contract_pages:
+                    from analyzer import analyze_contract_terms
+
+                    div01_text = "\n\n".join(
+                        [
+                            f"--- Page {p['page_number']} ---\n{p['content']}"
+                            for p in sorted(
+                                contract_pages, key=lambda x: x["page_number"]
+                            )
+                        ]
+                    )
+                    print(f"[ANALYZE] Contract text: {len(div01_text):,} chars")
+                    contract_analysis = await analyze_contract_terms(
+                        div01_text, request.project_name
+                    )
+                    analysis_result["contract_analysis"] = contract_analysis
+
+            cross_ref_count = 0  # Section analysis handles cross-refs internally
+
+        else:
+            print(f"[ANALYZE] Using SINGLE-PASS analysis (small division)")
+
+            # Collect cross-references from those pages
+            all_cross_refs = set()
+            for page in division_pages:
+                refs = page.get("cross_refs") or []
+                all_cross_refs.update(refs)
+
+            # Filter to external refs only (not same division)
+            external_refs = [r for r in all_cross_refs if not r.startswith(division)]
+            print(f"[ANALYZE] Found {len(external_refs)} cross-referenced sections")
+
+            # Fetch cross-referenced pages (limit to top 10 to avoid token explosion)
+            cross_ref_pages = []
+            for ref in sorted(external_refs)[:10]:
+                ref_pages = get_pages_by_section(spec_id, ref)
+                cross_ref_pages.extend(ref_pages)
+
+            if cross_ref_pages:
+                print(f"[ANALYZE] Fetched {len(cross_ref_pages)} cross-ref pages")
+
+            cross_ref_count = len(cross_ref_pages)
+
+            # Build division text from pages
+            division_text = "\n\n".join(
+                [
+                    f"--- Page {p['page_number']} (Section {p['section_number'] or 'unknown'}) ---\n{p['content']}"
+                    for p in sorted(division_pages, key=lambda x: x["page_number"])
+                ]
+            )
+            print(f"[ANALYZE] Division text: {len(division_text):,} chars")
+
+            # Get Division 00/01 for contract terms
+            div01_text = None
+            if request.include_contract_terms:
+                div00_pages = get_pages_by_division(spec_id, "00")
+                div01_pages = get_pages_by_division(spec_id, "01")
+                contract_pages = div00_pages + div01_pages
+
+                if contract_pages:
+                    div01_text = "\n\n".join(
+                        [
+                            f"--- Page {p['page_number']} ---\n{p['content']}"
+                            for p in sorted(
+                                contract_pages, key=lambda x: x["page_number"]
+                            )
+                        ]
+                    )
+                    print(f"[ANALYZE] Contract text: {len(div01_text):,} chars")
+
+            # Run AI analysis
+            print("[ANALYZE] Running AI analysis...")
+            analysis_result = await run_full_analysis(
+                division_text=division_text,
+                div01_text=div01_text,
+                trade=trade,
+                project_name=request.project_name,
+            )
 
         # Store in database
         print("[ANALYZE] Saving analysis to database...")
@@ -432,18 +498,20 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
             spec_id=spec_id,
             job_id=spec["job_id"],
             division_code=division,
-            analysis_type="full",
+            analysis_type="section_by_section" if use_section_analysis else "full",
             result=analysis_result,
             processing_time_ms=analysis_result["processing_time_ms"],
         )
 
         print(f"\n[ANALYZE] Complete! ({analysis_result['processing_time_ms']}ms)")
+        if use_section_analysis:
+            print(f"[ANALYZE] Analyzed {section_count} sections individually")
 
         return AnalyzeResponse(
             spec_id=spec_id,
             division=division,
             pages_analyzed=len(division_pages),
-            cross_refs_included=len(cross_ref_pages),
+            cross_refs_included=cross_ref_count,
             analysis=analysis_result,
             processing_time_ms=analysis_result["processing_time_ms"],
         )

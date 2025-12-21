@@ -7,11 +7,18 @@ Stage 2 (OpenAI): Create SHORT executive summary focused on action items
 The key insight: Gemini extracts everything, OpenAI summarizes what to DO.
 """
 
+import asyncio
+import json
 import os
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
-from prompts import get_summarize_prompt
+from prompts import (
+    get_section_combine_prompt,
+    get_section_extract_prompt,
+    get_summarize_prompt,
+)
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -365,6 +372,285 @@ KEEP IT SHORT AND ACTIONABLE. The detailed specs are already extracted - don't r
             )
     except Exception as e:
         return f"Executive summary error: {str(e)}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# SECTION-BY-SECTION ANALYSIS (For Large Divisions)
+# ═══════════════════════════════════════════════════════════════
+
+# Threshold: Use section-by-section for divisions over this many pages
+SECTION_ANALYSIS_PAGE_THRESHOLD = 100
+
+# Maximum concurrent section extractions
+MAX_CONCURRENT_EXTRACTIONS = 5
+
+
+async def extract_section(
+    section_number: str,
+    section_title: str,
+    content: str,
+    page_count: int,
+) -> Dict[str, Any]:
+    """
+    Phase 1: Extract data from a single section using Gemini.
+    Returns structured JSON with equipment, materials, manufacturers, etc.
+    """
+    prompt = get_section_extract_prompt(section_number, section_title, page_count)
+
+    full_prompt = f"""{prompt}
+
+SPECIFICATION CONTENT:
+{content}"""
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        response = await client.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 8000,
+                    "responseMimeType": "application/json",
+                },
+            },
+        )
+
+        if response.status_code != 200:
+            return {
+                "section": section_number,
+                "error": f"API error: {response.status_code}",
+            }
+
+        data = response.json()
+        result_text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "{}")
+        )
+
+        # Parse JSON response
+        try:
+            return json.loads(result_text)
+        except json.JSONDecodeError:
+            # Try to extract JSON from response
+            return {
+                "section": section_number,
+                "raw_text": result_text[:2000],
+                "parse_error": True,
+            }
+
+
+async def combine_section_results(
+    section_results: List[Dict[str, Any]],
+    trade: str,
+    division: str,
+) -> Dict[str, Any]:
+    """
+    Phase 2: Combine all section extractions into a unified summary.
+    """
+    config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS.get("general", {}))
+    trade_name = config.get("name", trade.title())
+
+    # Format section results for the prompt
+    results_text = json.dumps(section_results, indent=2)
+
+    # Truncate if too long
+    max_chars = 150000
+    if len(results_text) > max_chars:
+        results_text = results_text[:max_chars] + "\n\n[TRUNCATED]"
+
+    prompt = get_section_combine_prompt(
+        trade_name=trade_name,
+        division=division,
+        section_count=len(section_results),
+        section_results=results_text,
+    )
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 16000,
+                    "responseMimeType": "application/json",
+                },
+            },
+        )
+
+        if response.status_code != 200:
+            return {"error": f"Combine API error: {response.status_code}"}
+
+        data = response.json()
+        result_text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "{}")
+        )
+
+        try:
+            return json.loads(result_text)
+        except json.JSONDecodeError:
+            return {"raw_combined": result_text, "parse_error": True}
+
+
+async def format_combined_for_output(
+    combined_data: Dict[str, Any],
+    trade: str,
+    division: str,
+    project_name: Optional[str] = None,
+) -> str:
+    """
+    Phase 3: Convert combined JSON into formatted markdown using trade prompt.
+    """
+    config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS.get("general", {}))
+    trade_name = config.get("name", trade.title())
+    base_prompt = get_summarize_prompt(trade, division)
+
+    combined_text = json.dumps(combined_data, indent=2)
+
+    prompt = f"""PROJECT: {project_name or "Construction Project"}
+DIVISION: {division} - {trade_name}
+
+You have already extracted and combined data from all sections. Now format this into the final bid summary.
+
+COMBINED EXTRACTION DATA:
+{combined_text}
+
+=======================================================================
+FORMAT THE OUTPUT ACCORDING TO THESE INSTRUCTIONS:
+=======================================================================
+
+{base_prompt}
+
+Note: The data has already been extracted section-by-section and combined.
+Your job is to format it into the scannable summary format above.
+Include any conflicts or gaps that were identified during extraction."""
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        response = await client.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
+            },
+        )
+
+        if response.status_code != 200:
+            return f"Formatting failed: {response.status_code}"
+
+        data = response.json()
+        return (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "No output generated")
+        )
+
+
+async def analyze_division_by_section(
+    sections: List[Dict[str, Any]],
+    trade: str,
+    division: str,
+    project_name: Optional[str] = None,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Full section-by-section analysis pipeline for large divisions.
+
+    Args:
+        sections: List of section dicts with 'section_number', 'title', 'content', 'page_count'
+        trade: Trade name for prompt selection
+        division: Division code (e.g., "23")
+        project_name: Optional project name
+        progress_callback: Optional callback(status, current, total) for progress updates
+
+    Returns:
+        Analysis result dict with trade_analysis, section_extractions, etc.
+    """
+    start_time = time.time()
+
+    total_sections = len(sections)
+    section_results = []
+
+    if progress_callback:
+        progress_callback("extracting", 0, total_sections)
+
+    # Phase 1: Extract each section (with concurrency limit)
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXTRACTIONS)
+
+    async def extract_with_semaphore(section: Dict[str, Any], index: int):
+        async with semaphore:
+            result = await extract_section(
+                section_number=section["section_number"],
+                section_title=section.get("title", ""),
+                content=section["content"],
+                page_count=section.get("page_count", 0),
+            )
+            if progress_callback:
+                progress_callback("extracting", index + 1, total_sections)
+            return result
+
+    # Run all extractions with concurrency limit
+    tasks = [extract_with_semaphore(section, i) for i, section in enumerate(sections)]
+    section_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Filter out exceptions
+    valid_results = []
+    for i, result in enumerate(section_results):
+        if isinstance(result, Exception):
+            valid_results.append(
+                {
+                    "section": sections[i]["section_number"],
+                    "error": str(result),
+                }
+            )
+        else:
+            valid_results.append(result)
+
+    if progress_callback:
+        progress_callback("combining", 0, 1)
+
+    # Phase 2: Combine all results
+    combined_data = await combine_section_results(valid_results, trade, division)
+
+    if progress_callback:
+        progress_callback("formatting", 0, 1)
+
+    # Phase 3: Format for output
+    formatted_summary = await format_combined_for_output(
+        combined_data, trade, division, project_name
+    )
+
+    processing_time_ms = int((time.time() - start_time) * 1000)
+
+    return {
+        "trade_analysis": {
+            "summary": formatted_summary,
+            "format": "markdown",
+            "trade": trade,
+            "division": division,
+            "section_by_section": True,
+            "sections_analyzed": total_sections,
+        },
+        "section_extractions": valid_results,
+        "combined_data": combined_data,
+        "processing_time_ms": processing_time_ms,
+    }
+
+
+def should_use_section_analysis(page_count: int, section_count: int) -> bool:
+    """
+    Determine if section-by-section analysis should be used.
+
+    Uses section analysis when:
+    - Division has more than SECTION_ANALYSIS_PAGE_THRESHOLD pages (100)
+    - AND has multiple sections (at least 2)
+    """
+    return page_count >= SECTION_ANALYSIS_PAGE_THRESHOLD and section_count >= 2
 
 
 # ═══════════════════════════════════════════════════════════════

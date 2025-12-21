@@ -574,10 +574,33 @@ async function analyzeSelectedDivision() {
   analysisStartTime = Date.now();
 
   try {
-    updateLoadingStatus(
-      `Analyzing Division ${selectedDivision} - ${getDivisionName(selectedDivision)}...`,
-      60,
+    // Find the selected division in parseResult to get page count
+    const divInfo = parseResult?.divisions?.find(
+      (d) => d.code === selectedDivision,
     );
+    const pageCount = divInfo?.page_count || 0;
+    const sectionCount = divInfo?.section_count || 0;
+
+    // Determine if this will use section-by-section (100+ pages, 2+ sections)
+    const usingSectionAnalysis = pageCount >= 100 && sectionCount >= 2;
+
+    if (usingSectionAnalysis) {
+      updateLoadingStatus(
+        `Analyzing ${sectionCount} sections in Division ${selectedDivision}...`,
+        20,
+      );
+      console.log(
+        `[API] Large division detected: ${pageCount} pages, ${sectionCount} sections`,
+      );
+      console.log(
+        `[API] Using SECTION-BY-SECTION analysis for better accuracy`,
+      );
+    } else {
+      updateLoadingStatus(
+        `Analyzing Division ${selectedDivision} - ${getDivisionName(selectedDivision)}...`,
+        60,
+      );
+    }
     console.log(`[API] Analyzing Division ${selectedDivision}...`);
 
     const analysisResponse = await analyzeSpec(
@@ -597,9 +620,24 @@ async function analyzeSelectedDivision() {
     const tradeSummary = analysis.trade_analysis?.summary || "";
     const contractSummary = analysis.contract_analysis?.summary || "";
     const executiveSummary = analysis.executive_summary || "";
+    const sectionBySection =
+      analysis.trade_analysis?.section_by_section || false;
+    const sectionsAnalyzed = analysis.trade_analysis?.sections_analyzed || 0;
+
+    // Log analysis method used
+    if (sectionBySection) {
+      console.log(
+        `[API] Used SECTION-BY-SECTION analysis: ${sectionsAnalyzed} sections analyzed individually`,
+      );
+    }
 
     // Combine into display format
     let combinedMarkdown = "";
+
+    // Add a note if section-by-section was used
+    if (sectionBySection && sectionsAnalyzed > 0) {
+      combinedMarkdown += `> **Enhanced Analysis**: This large division was analyzed section-by-section (${sectionsAnalyzed} sections) for better accuracy.\n\n`;
+    }
 
     if (executiveSummary) {
       combinedMarkdown += executiveSummary + "\n\n---\n\n";
