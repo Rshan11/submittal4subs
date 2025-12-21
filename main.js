@@ -374,6 +374,10 @@ function populateDivisionDropdown(divisions) {
   divisions.forEach((div) => {
     const option = document.createElement("option");
     option.value = div.code;
+    // Store section_count as data attribute for later use
+    option.dataset.pageCount = div.page_count || 0;
+    option.dataset.sectionCount =
+      div.section_count || div.sections?.length || 0;
     const pageCount = div.page_count || 0;
     option.textContent = `Division ${div.code} - ${getDivisionName(div.code)} (${pageCount} pages)`;
     divisionSelect.appendChild(option);
@@ -574,19 +578,27 @@ async function analyzeSelectedDivision() {
   analysisStartTime = Date.now();
 
   try {
-    // Find the selected division in parseResult to get page count
-    const divInfo = parseResult?.divisions?.find(
-      (d) => d.code === selectedDivision,
-    );
-    const pageCount = divInfo?.page_count || 0;
-    const sectionCount = divInfo?.section_count || 0;
+    // Get page count and section count from dropdown data attributes or parseResult
+    const selectedOption = divisionSelect?.selectedOptions[0];
+    let pageCount = parseInt(selectedOption?.dataset?.pageCount || 0);
+    let sectionCount = parseInt(selectedOption?.dataset?.sectionCount || 0);
+
+    // Fallback to parseResult if data attributes not available
+    if (!pageCount || !sectionCount) {
+      const divInfo = parseResult?.divisions?.find(
+        (d) => d.code === selectedDivision,
+      );
+      pageCount = divInfo?.page_count || pageCount;
+      sectionCount =
+        divInfo?.section_count || divInfo?.sections?.length || sectionCount;
+    }
 
     // Determine if this will use section-by-section (100+ pages, 2+ sections)
     const usingSectionAnalysis = pageCount >= 100 && sectionCount >= 2;
 
     if (usingSectionAnalysis) {
       updateLoadingStatus(
-        `Analyzing ${sectionCount} sections in Division ${selectedDivision}...`,
+        `Deep analysis: ${sectionCount} sections in Division ${selectedDivision} (${pageCount} pages)...`,
         20,
       );
       console.log(

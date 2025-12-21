@@ -291,6 +291,7 @@ async def parse_spec_endpoint(spec_id: str):
                     "code": div_code,
                     "page_count": info["count"],
                     "sections": info["sections"],
+                    "section_count": len(info["sections"]),
                     "page_range": f"{min(pages)}-{max(pages)}" if pages else None,
                 }
             )
