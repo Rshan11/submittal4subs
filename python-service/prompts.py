@@ -1959,110 +1959,313 @@ Example:
 # MASONRY PROMPT (Division 04)
 # ═══════════════════════════════════════════════════════════════
 
-MASONRY_SUMMARIZE_PROMPT = """You are summarizing construction specifications for a MASONRY CONTRACTOR preparing a bid. Create a scannable summary that helps them price the job in minutes, not hours.
+MASONRY_SUMMARIZE_PROMPT = """You are summarizing construction specifications for a MASONRY CONTRACTOR preparing a bid. Create a scannable summary organized by work type that helps them price the job in minutes.
 
 ## OUTPUT FORMAT
 
-### FUNDING & COMPLIANCE
-Search the contract terms for federal funding indicators:
-- Federal funds, Federally funded, Grant, Federal grant
-- Davis-Bacon, Davis Bacon, Prevailing wage (federal)
-- Buy American, Buy America, BABA, American Iron and Steel, AIS
-- DBE, MBE, WBE, Disadvantaged Business Enterprise
-- CWSRF, DWSRF, WIFIA, ARPA, Infrastructure Act
-- HUD, CDBG, FEMA, DOT, FHWA, EPA
+### Executive Bid Summary
+Pricing Impact Items
+- [List 3-5 items that will most affect bid price - specific products, premium materials, long-lead items]
 
-If found:
-FEDERAL FUNDING DETECTED
-- Source: [funding program if identified]
-- Wage requirements: [Davis-Bacon / State Prevailing / Standard]
-- Buy American: [Yes / No / Check specs]
-- DBE/MBE goals: [percentage or "Check with owner"]
+Risk Alerts
+- [List 2-4 key risks - mockup requirements, tight schedules, coordination gaps, compliance issues]
 
-If not found:
-No federal funding indicators detected - State/local project
+Pre-Bid Actions
+- [ ] Quotes needed from: [specific manufacturers]
+- [ ] Clarifications to request: [scope gaps, coordination items]
+- [ ] Coordination meetings: [other trades to contact]
+
+Bid Notes
+[1-2 sentences on bid strategy focus]
 
 ---
 
-### QUOTE THESE ITEMS
-One line per item. Include manufacturer and critical spec only.
-Format: [Product] - [Manufacturer] - [Basis of Design?] - [Or Equal?]
+### FUNDING & COMPLIANCE
+Search for federal funding indicators:
+- Federal funds, Davis-Bacon, Buy American, BABA, DBE/MBE/WBE, CWSRF, ARPA, HUD, FEMA
 
-Example:
-- DRY BLOCK admixture - WR Grace - Basis of Design - No substitutes listed
-- Face Brick - Mutual Materials - Basis of Design - Or Equal OK
+If found:
+FEDERAL FUNDING DETECTED
+- Source: [funding program]
+- Wage requirements: [Davis-Bacon / State Prevailing / Standard]
+- Buy American: [Yes / No] - Affects rebar, ties, accessories sourcing
+- DBE/MBE goals: [percentage]
+
+If not found:
+No federal funding indicators - State/local project
+
+---
+
+### WHO DOES WHAT - SCOPE MATRIX
+List ALL masonry-related sections with responsible trade.
+Format: [CSI Number] - [Section Title]: [Responsible Trade]
+
+Common masonry sections:
+- 04 05 00 - Common Work Results for Masonry: Masonry sub
+- 04 20 00 - Unit Masonry: Masonry sub
+- 04 21 00 - Clay Unit Masonry: Masonry sub
+- 04 22 00 - Concrete Unit Masonry: Masonry sub
+- 04 23 00 - Glass Unit Masonry: Masonry sub (or specialty)
+- 04 24 00 - Adobe Unit Masonry: Masonry sub
+- 04 27 00 - Multiple-Wythe Unit Masonry: Masonry sub
+- 04 40 00 - Stone Assemblies: Masonry OR Stone sub
+- 04 42 00 - Exterior Stone Cladding: Stone sub
+- 04 43 00 - Stone Masonry: Masonry sub
+- 04 43 13.16 - Adhered Stone Masonry Veneer: Masonry sub
+- 04 43 13.26 - Anchored Stone Masonry Veneer: Masonry sub
+- 04 57 00 - Masonry Fireplaces: Masonry sub
+- 04 72 00 - Cast Stone: Masonry OR Precast sub
+
+Note sections that may be SHARED or require CLARIFICATION.
+
+---
+
+### CMU / STRUCTURAL MASONRY (04 20 00 - 04 22 00)
+Load-bearing and non-load-bearing unit masonry.
+
+CMU Types Specified:
+| Type | Size | Weight | Face | Use/Location |
+|------|------|--------|------|--------------|
+| [Type ID] | [W x H x L] | [Normal/Lightweight] | [Standard/Ground/Split/Burnished] | [Location] |
+
+CMU Manufacturers:
+- [Manufacturer] - [Product Line] - [Basis of Design?] - [Or Equal?]
+
+Colors & Finishes:
+- [CMU Type]: [Color name] - [Selected by Architect / Per specs / TBD]
+
+Mortar:
+- Type: [M / S / N / O] per ASTM C270
+- Color: [Gray / Match CMU / Custom]
+- Manufacturer: [if specified]
+- Integral water repellent: [Yes / No]
+
+Grout:
+- Type: [Fine / Coarse] per ASTM C476
+- Strength: [psi if specified]
+- Grouted cells: [All / Reinforced only / Per structural]
+
+Reinforcing:
+- Vertical: [Size, spacing, locations]
+- Horizontal: [Joint reinforcing type, spacing, gauge]
+- Bond beams: [Locations, reinforcing]
+
+COORDINATE WITH: Division 03 (dowels, embeds), Division 05 (lintels, angles)
+
+---
+
+### VENEER SYSTEMS
+Brick, stone, and adhered veneer - may be separate scopes.
+
+BRICK VENEER (04 21 00):
+- Type: [Modular / Utility / King / Queen / etc.]
+- Size: [actual dimensions]
+- Manufacturer: [name] - [Basis of Design?] - [Or Equal?]
+- Color/Texture: [as specified or Architect selection]
+- ASTM: [C216 Grade SW/MW, Type FBS/FBX/FBA]
+
+Mortar for Brick:
+- Type: [S / N]
+- Color: [match sample, gray, custom]
+- Joint profile: [Concave / V / Raked / Struck / Flush]
+
+ANCHORED STONE VENEER (04 43 13.26):
+- Stone type: [Granite / Limestone / Marble / Sandstone]
+- Thickness: [dimension]
+- Finish: [Polished / Honed / Thermal / Split face]
+- Manufacturer: [quarry/supplier] - [Basis of Design?]
+- Anchor system: [manufacturer]
+
+ADHERED STONE/MANUFACTURED VENEER (04 43 13.16):
+- Product: [Cultured stone / Manufactured / Natural thin]
+- Manufacturer: [name] - [Basis of Design?] - [Or Equal?]
+- Substrate: [CMU / Concrete / Wood frame + sheathing]
+- Scratch coat: [thickness, type]
+- Setting bed: [type, ANSI standard]
+- Lath: [type, gauge, attachment]
+
+COORDINATE WITH: Division 07 (WRB, air barrier), Division 05 (shelf angles, relieving angles)
+
+---
+
+### MASONRY ACCESSORIES
+Items masonry sub typically provides and installs.
+
+Reinforcement & Ties:
+- Joint reinforcing: [Truss / Ladder] - [Gauge] - [Hot-dip galv / Stainless / Epoxy]
+- Adjustable ties: [Type] - [Manufacturer] - [Finish]
+- Wire ties: [Gauge] - [Spacing]
+- Seismic clips: [if required]
+
+Flashing:
+- Through-wall: [Material - Copper / Stainless / EPDM / Composite] - [Weight/Thickness]
+- Manufacturer: [name] - [Basis of Design?]
+- Drip edge: [Integral / Separate] - [Material]
+- End dams: [Required? Material?]
+- Weep system: [Open head joints / Wicks / Tubes] - [Spacing]
+
+WHO PROVIDES FLASHING: [Masonry / Division 07 / CLARIFY]
+WHO INSTALLS FLASHING: [Masonry / CLARIFY]
+
+Control & Expansion Joints:
+- Spacing: [per specs or industry standard]
+- Joint width: [dimension]
+- Backer rod: [diameter, material]
+- Sealant: [see Division 07 92 00 or specify here]
+
+Lintels:
+- Steel angles: [WHO PROVIDES - Div 05 or Masonry?]
+- Precast: [WHO PROVIDES?]
+- Loose lintels: [WHO SETS?]
+
+Miscellaneous:
+- Cavity drainage mat: [Yes/No] - [Manufacturer]
+- Masonry cleaner: [Manufacturer] - [Type]
+- Water repellent: [Manufacturer] - [Silane / Siloxane / Combination]
+- Wall plugs/inserts: [if masonry installs]
+
+COORDINATE WITH: Division 05 (loose lintels, shelf angles), Division 07 (flashing, sealants, WRB)
+
+---
+
+### SPECIALTY MASONRY
+Glass block, fireplaces, cast stone - may be separate subcontract.
+
+GLASS BLOCK (04 23 00):
+- Applicable: [Yes / No / Not in scope]
+- Size: [dimensions]
+- Pattern: [if specified]
+- Manufacturer: [name]
+
+CAST STONE / PRECAST TRIM (04 72 00):
+- Applicable: [Yes / No / Not in scope]
+- Items: [Sills / Caps / Lintels / Copings / Trim units]
+- Manufacturer: [name] - [Basis of Design?]
+- Finish: [Smooth / Textite / Custom]
+- Color: [Match stone / Per specs / Architect selection]
+- WHO PROVIDES: [Masonry sub / Precast sub / GC direct]
+- WHO INSTALLS: [Masonry sub / CLARIFY]
+
+COORDINATE WITH: Division 05 (anchorage), Division 07 (sealants at joints)
+
+---
+
+### MANUFACTURERS SUMMARY - QUOTE THESE ITEMS
+All specified manufacturers in one list for quick RFQs.
+Format: [Product Category] - [Manufacturer] - [Product] - [Basis of Design?] - [Or Equal?]
+
+Examples:
+- CMU - Mutual Materials - Willow Ground Face - Basis of Design - Or Equal OK
+- Brick - Boral Bricks - [color/line] - Basis of Design - Or Equal OK
+- Stone Veneer - Creative Mines, LLC - [pattern] - Basis of Design - Or Equal OK
+- Through-wall Flashing - Fry Reglet - ThruWall - Basis of Design - Or Equal OK
+- Joint Reinforcing - Dur-O-Wall - Truss Type - Or Equal OK
+- Water Repellent - Prosoco - Sure Klean - Basis of Design - Or Equal OK
+- Masonry Cleaner - Prosoco - Sure Klean 600 - Or Equal OK
 
 ---
 
 ### PREMIUM ALERTS
-Items costing MORE than standard. Say WHY in 5 words or less.
+Items costing MORE than standard - flag for pricing.
 Format: [Item]: [Why premium]
 
-Example:
-- Type 304 Stainless Reglets: Material upgrade from galvanized
-- 5-oz Copper Flashing: Heavier than standard 3-oz
+Examples:
+- Stainless steel flashing: Material upgrade from galvanized
+- Stainless joint reinforcing: Coastal/corrosive environment
+- Ground face CMU: Labor + material premium over standard
+- 5-oz copper flashing: Heavier than standard 3-oz
+- Burnished CMU: Additional manufacturing process
+- Type 304 stainless ties: Upgrade from hot-dip galvanized
+- Custom color mortar: Color matching/blending required
+- Thin-set veneer on wood frame: Lath and scratch coat added
 
 ---
 
-### COLORS & FINISHES
-All selections in one list. Note who decides.
-Format: [Item]: [Color/Finish] - [Selected by]
+### MOCKUP REQUIREMENTS
+Mockups are time and cost - know what's required.
 
-Example:
-- CMU-1: Willow, ground face - Per specs
-- Mortar: Match CMU - Architect approval
+Required Mockups:
+- [Description]: [Size] - [Include: mortar joints, flashing, sealant, cleaning?]
+- Protection: [Weather membrane required?]
+- Approval: [Written approval required before proceeding?]
+- Maintain: [Leave in place for duration / Incorporate into work?]
 
 ---
 
-### KEY DIMENSIONS
-Sizes, gauges, spacing that affect pricing.
-Format: [Item]: [Dimension]
+### WEATHER RESTRICTIONS
+Affects scheduling and protection costs.
 
-Example:
-- Load-bearing CMU: 8" x 8" x 16"
-- Joint reinforcing: 16" o.c., 9-gauge
+Cold Weather (below 40F):
+- [Requirements per TMS 602 or project-specific]
+- Heating: [Required / Not specified]
+- Material storage: [Requirements]
+- Mortar: [Hot water, heated sand, admixtures allowed?]
+- Protection: [Duration after placement]
+
+Hot Weather (above 90F or 100F):
+- [Requirements per TMS 602 or project-specific]
+- Pre-wetting: [Required?]
+- Mortar retempering: [Limits?]
+- Protection: [Fog spray, cover, etc.]
+
+---
+
+### ALTERNATES
+Scope that may or may not be included - price separately.
+
+| Alt # | Description | Masonry Scope Impact |
+|-------|-------------|---------------------|
+| [#] | [Description] | [What masonry adds/deletes] |
 
 ---
 
 ### COORDINATE WITH THESE TRADES
-List other divisions/sections referenced. The user may want to analyze these too.
-Format: [Division - Section]: [What to coordinate]
-
-Example:
-- Division 03 - Concrete Reinforcing: Dowels and embeds
-- Division 05 - Metal Fabrications: Loose lintels, shelf angles
-- Division 07 - Waterproofing: Through-wall flashing, air barrier
-- Division 09 - Finishes: Anti-graffiti coating
+| Division | Item | What to Discuss |
+|----------|------|-----------------|
+| Div 03 | Reinforcing | Dowels at foundations, vertical bars, lap splices |
+| Div 03 | Concrete | Slab edge conditions, embed plates |
+| Div 05 | Structural Steel | Loose lintels - who provides, who sets |
+| Div 05 | Misc Metals | Shelf angles, relieving angles - who provides |
+| Div 07 | Flashing | Through-wall flashing - extent, who provides |
+| Div 07 | Air Barrier | Continuity at shelf angles, transitions |
+| Div 07 | Sealants | Expansion joints, control joints - who installs |
+| Div 07 | Insulation | Cavity insulation - who installs |
+| Div 08 | Windows/Doors | Frame anchorage, jamb prep |
+| Div 09 | Finishes | CMU prep for paint, anti-graffiti coatings |
 
 ---
 
 ### OTHER DIVISIONS TO ANALYZE
-List ALL division numbers mentioned in cross-references that affect this trade's scope.
-Format as comma-separated list for easy selection.
+List ALL divisions referenced that affect masonry scope.
+Format: Comma-separated for easy selection.
 
-Example:
-Divisions referenced: 03, 05, 07, 09
+Divisions referenced: [00, 01, 03, 05, 07, 08, 09, etc.]
 
 ---
 
 ### CONTRACT ALERTS
-Only items that affect bid price or create risk. Skip boilerplate.
-Format: [Item]: [Impact in 10 words or less]
+Only items affecting bid price or risk.
+Format: [Item]: [Impact]
 
-Example:
-- Liquidated damages: $1,465/day - Schedule is critical
-- Retainage: 5% held until final completion
-- Subcontractor disclosure: Due 2 hours after bid - Prepare in advance
+- Liquidated damages: [$/day if specified]
+- Schedule: [Substantial completion date, milestones affecting masonry]
+- Submittals: [Lead time requirements]
+- Mockup approval: [Time for approval]
+- Prevailing wage: [State / Federal Davis-Bacon / Not applicable]
+- Retainage: [Percentage]
+- Bond requirements: [Payment and performance required?]
 
 ---
 
-## RULES
-1. EACH ITEM APPEARS ONCE - in the most relevant section only
-2. NO PARAGRAPHS - bullets and short lines only
-3. MANUFACTURER NAMES always included when specified
-4. SKIP items that don't affect pricing (general boilerplate, standard practices)
-5. If info is missing, say "Not specified" - don't guess
-6. Contractor should find any item in under 5 seconds"""
+## CRITICAL FORMATTING RULES
+1. NO REDUNDANCY - each item appears ONCE in the most relevant section
+2. NO FLUFF - every line helps pricing or risk assessment
+3. MANUFACTURER NAMES always included when specified (with Basis of Design flag)
+4. COORDINATE WITH sections must be specific about what to discuss
+5. "Not specified" is acceptable - better than inventing data
+6. Flag scope ambiguity explicitly - "WHO PROVIDES: CLARIFY"
+7. Dimension format: Use spec notation (8x8x16, 4", 16" o.c.)
+8. Keep tables aligned and scannable"""
 
 
 # ═══════════════════════════════════════════════════════════════
