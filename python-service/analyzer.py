@@ -502,9 +502,11 @@ async def format_combined_for_output(
     trade: str,
     division: str,
     project_name: Optional[str] = None,
+    contract_summary: Optional[str] = None,
 ) -> str:
     """
     Phase 3: Convert combined JSON into formatted markdown using trade prompt.
+    Includes contract summary for federal funding detection.
     """
     config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS.get("general", {}))
     trade_name = config.get("name", trade.title())
@@ -512,11 +514,20 @@ async def format_combined_for_output(
 
     combined_text = json.dumps(combined_data, indent=2)
 
+    # Include contract info if available (for federal funding detection)
+    contract_section = ""
+    if contract_summary:
+        contract_section = f"""
+CONTRACT TERMS (Division 00/01):
+{contract_summary}
+
+"""
+
     prompt = f"""PROJECT: {project_name or "Construction Project"}
 DIVISION: {division} - {trade_name}
 
 You have already extracted and combined data from all sections. Now format this into the final bid summary.
-
+{contract_section}
 COMBINED EXTRACTION DATA:
 {combined_text}
 
@@ -528,7 +539,8 @@ FORMAT THE OUTPUT ACCORDING TO THESE INSTRUCTIONS:
 
 Note: The data has already been extracted section-by-section and combined.
 Your job is to format it into the scannable summary format above.
-Include any conflicts or gaps that were identified during extraction."""
+Include any conflicts or gaps that were identified during extraction.
+IMPORTANT: Check the CONTRACT TERMS section for federal funding indicators (Davis-Bacon, Buy American, DOD, etc.) and include in FUNDING & COMPLIANCE section."""
 
     async with httpx.AsyncClient(timeout=90.0) as client:
         response = await client.post(
@@ -557,6 +569,7 @@ async def analyze_division_by_section(
     division: str,
     project_name: Optional[str] = None,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    contract_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Full section-by-section analysis pipeline for large divisions.
@@ -567,6 +580,7 @@ async def analyze_division_by_section(
         division: Division code (e.g., "23")
         project_name: Optional project name
         progress_callback: Optional callback(status, current, total) for progress updates
+        contract_summary: Optional pre-analyzed contract terms (for federal funding detection)
 
     Returns:
         Analysis result dict with trade_analysis, section_extractions, etc.
@@ -620,9 +634,9 @@ async def analyze_division_by_section(
     if progress_callback:
         progress_callback("formatting", 0, 1)
 
-    # Phase 3: Format for output
+    # Phase 3: Format for output (include contract summary for federal funding detection)
     formatted_summary = await format_combined_for_output(
-        combined_data, trade, division, project_name
+        combined_data, trade, division, project_name, contract_summary
     )
 
     processing_time_ms = int((time.time() - start_time) * 1000)

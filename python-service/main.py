@@ -400,15 +400,10 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
                 f"[ANALYZE] Sections to analyze: {[s['section_number'] for s in sections]}"
             )
 
-            # Run section-by-section analysis
-            analysis_result = await analyze_division_by_section(
-                sections=sections,
-                trade=trade,
-                division=division,
-                project_name=request.project_name,
-            )
-
-            # Add contract terms analysis if requested
+            # Analyze contract terms FIRST so we can pass to section analysis
+            # (needed for federal funding detection in final output)
+            contract_analysis = None
+            contract_summary_text = None
             if request.include_contract_terms:
                 div00_pages = get_pages_by_division(spec_id, "00")
                 div01_pages = get_pages_by_division(spec_id, "01")
@@ -429,7 +424,21 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
                     contract_analysis = await analyze_contract_terms(
                         div01_text, request.project_name
                     )
-                    analysis_result["contract_analysis"] = contract_analysis
+                    contract_summary_text = contract_analysis.get("summary", "")
+                    print(f"[ANALYZE] Contract analysis complete")
+
+            # Run section-by-section analysis with contract info
+            analysis_result = await analyze_division_by_section(
+                sections=sections,
+                trade=trade,
+                division=division,
+                project_name=request.project_name,
+                contract_summary=contract_summary_text,
+            )
+
+            # Add contract analysis to result
+            if contract_analysis:
+                analysis_result["contract_analysis"] = contract_analysis
 
             cross_ref_count = 0  # Section analysis handles cross-refs internally
 
