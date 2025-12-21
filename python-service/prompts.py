@@ -1956,6 +1956,116 @@ Example:
 
 
 # ═══════════════════════════════════════════════════════════════
+# MASONRY PROMPT (Division 04)
+# ═══════════════════════════════════════════════════════════════
+
+MASONRY_SUMMARIZE_PROMPT = """You are summarizing construction specifications for a MASONRY CONTRACTOR preparing a bid. Create a scannable summary that helps them price the job in minutes, not hours.
+
+## OUTPUT FORMAT
+
+### FUNDING & COMPLIANCE
+Search the contract terms for federal funding indicators:
+- Federal funds, Federally funded, Grant, Federal grant
+- Davis-Bacon, Davis Bacon, Prevailing wage (federal)
+- Buy American, Buy America, BABA, American Iron and Steel, AIS
+- DBE, MBE, WBE, Disadvantaged Business Enterprise
+- CWSRF, DWSRF, WIFIA, ARPA, Infrastructure Act
+- HUD, CDBG, FEMA, DOT, FHWA, EPA
+
+If found:
+FEDERAL FUNDING DETECTED
+- Source: [funding program if identified]
+- Wage requirements: [Davis-Bacon / State Prevailing / Standard]
+- Buy American: [Yes / No / Check specs]
+- DBE/MBE goals: [percentage or "Check with owner"]
+
+If not found:
+No federal funding indicators detected - State/local project
+
+---
+
+### QUOTE THESE ITEMS
+One line per item. Include manufacturer and critical spec only.
+Format: [Product] - [Manufacturer] - [Basis of Design?] - [Or Equal?]
+
+Example:
+- DRY BLOCK admixture - WR Grace - Basis of Design - No substitutes listed
+- Face Brick - Mutual Materials - Basis of Design - Or Equal OK
+
+---
+
+### PREMIUM ALERTS
+Items costing MORE than standard. Say WHY in 5 words or less.
+Format: [Item]: [Why premium]
+
+Example:
+- Type 304 Stainless Reglets: Material upgrade from galvanized
+- 5-oz Copper Flashing: Heavier than standard 3-oz
+
+---
+
+### COLORS & FINISHES
+All selections in one list. Note who decides.
+Format: [Item]: [Color/Finish] - [Selected by]
+
+Example:
+- CMU-1: Willow, ground face - Per specs
+- Mortar: Match CMU - Architect approval
+
+---
+
+### KEY DIMENSIONS
+Sizes, gauges, spacing that affect pricing.
+Format: [Item]: [Dimension]
+
+Example:
+- Load-bearing CMU: 8" x 8" x 16"
+- Joint reinforcing: 16" o.c., 9-gauge
+
+---
+
+### COORDINATE WITH THESE TRADES
+List other divisions/sections referenced. The user may want to analyze these too.
+Format: [Division - Section]: [What to coordinate]
+
+Example:
+- Division 03 - Concrete Reinforcing: Dowels and embeds
+- Division 05 - Metal Fabrications: Loose lintels, shelf angles
+- Division 07 - Waterproofing: Through-wall flashing, air barrier
+- Division 09 - Finishes: Anti-graffiti coating
+
+---
+
+### OTHER DIVISIONS TO ANALYZE
+List ALL division numbers mentioned in cross-references that affect this trade's scope.
+Format as comma-separated list for easy selection.
+
+Example:
+Divisions referenced: 03, 05, 07, 09
+
+---
+
+### CONTRACT ALERTS
+Only items that affect bid price or create risk. Skip boilerplate.
+Format: [Item]: [Impact in 10 words or less]
+
+Example:
+- Liquidated damages: $1,465/day - Schedule is critical
+- Retainage: 5% held until final completion
+- Subcontractor disclosure: Due 2 hours after bid - Prepare in advance
+
+---
+
+## RULES
+1. EACH ITEM APPEARS ONCE - in the most relevant section only
+2. NO PARAGRAPHS - bullets and short lines only
+3. MANUFACTURER NAMES always included when specified
+4. SKIP items that don't affect pricing (general boilerplate, standard practices)
+5. If info is missing, say "Not specified" - don't guess
+6. Contractor should find any item in under 5 seconds"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # PROMPT SELECTION
 # ═══════════════════════════════════════════════════════════════
 
@@ -2000,6 +2110,10 @@ def get_summarize_prompt(trade: str, division: str = None) -> str:
     if trade_lower in ("steel", "metals", "structural") or division == "05":
         return METALS_SUMMARIZE_PROMPT
 
+    # Masonry (04)
+    if trade_lower == "masonry" or division == "04":
+        return MASONRY_SUMMARIZE_PROMPT
+
     # Default to generic prompt
     return GENERIC_SUMMARIZE_PROMPT
 
@@ -2007,6 +2121,7 @@ def get_summarize_prompt(trade: str, division: str = None) -> str:
 # Division to prompt mapping for future expansion
 DIVISION_PROMPTS = {
     "03": CONCRETE_SUMMARIZE_PROMPT,
+    "04": MASONRY_SUMMARIZE_PROMPT,
     "05": METALS_SUMMARIZE_PROMPT,
     "07": THERMAL_MOISTURE_SUMMARIZE_PROMPT,
     "22": PLUMBING_SUMMARIZE_PROMPT,

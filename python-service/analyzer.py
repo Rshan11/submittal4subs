@@ -11,6 +11,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 import httpx
+from prompts import get_summarize_prompt
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -93,8 +94,8 @@ async def analyze_division_with_gemini(
     division_text: str, trade: str, project_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Stage 1: Gemini extracts ALL product data with CRITICAL ITEMS first.
-    Universal prompt works for any division.
+    Stage 1: Gemini analyzes division using trade-specific prompt.
+    Prompts are loaded from prompts.py based on trade/division.
     """
     config = TRADE_CONFIGS.get(trade.lower(), TRADE_CONFIGS.get("general", {}))
     trade_name = config.get("name", trade.title())
@@ -105,113 +106,20 @@ async def analyze_division_with_gemini(
     if len(division_text) > max_chars:
         text_to_analyze += "\n\n[TRUNCATED - additional content not shown]"
 
-    prompt = f"""You are extracting product specifications from a construction spec document for a contractor preparing a bid.
+    # Get trade-specific prompt from prompts.py
+    base_prompt = get_summarize_prompt(trade, division)
 
-PROJECT: {project_name or "Construction Project"}
+    prompt = f"""PROJECT: {project_name or "Construction Project"}
 DIVISION: {division} - {trade_name}
 
 SPECIFICATION TEXT:
 {text_to_analyze}
 
 =======================================================================
-OUTPUT FORMAT - Follow this EXACT structure:
+INSTRUCTIONS:
 =======================================================================
 
-## CRITICAL BID ITEMS (Read This First)
-
-Identify and list the items that MOST AFFECT BID PRICING:
-
-### Specified Products (Basis of Design)
-List ANY item where a specific manufacturer/product is named:
-- [Product] - [Manufacturer] - [Model/Series if given]
-
-### Color & Finish Selections
-List ALL items with specified colors, textures, or finishes:
-- [Item]: [Color/Finish] - [Manufacturer if specified]
-
-### Premium/Unusual Requirements
-List items that are MORE EXPENSIVE than standard:
-- Stainless steel instead of galvanized
-- Special coatings or treatments
-- Higher grades than typical (e.g., Type 304 SS vs standard)
-- Seismic or special structural requirements
-
-### Quantity-Sensitive Items
-List items where the spec defines specific sizes, gauges, or quantities:
-- [Item]: [Size/Gauge/Specification]
-
----
-
-## 1. Manufacturers & Products
-
-| Manufacturer | Product | Model/Part # | Basis of Design? | Or Equal? |
-|--------------|---------|--------------|------------------|-----------|
-| (list all)   |         |              | Yes/No           | Yes/No    |
-
----
-
-## 2. Material Specifications
-
-For EACH material, list ALL specified properties:
-
-### [Material Name]
-- **Manufacturer**: (if specified)
-- **Standard**: ASTM/ANSI reference with Type/Grade/Class
-- **Size/Dimensions**:
-- **Weight/Gauge/Thickness**:
-- **Color/Finish**:
-- **Special Requirements**: (seismic, fire rating, etc.)
-
----
-
-## 3. Accessories & Components
-
-| Item | Specification | Size | Material | Coating/Finish |
-|------|---------------|------|----------|----------------|
-| (list all anchors, ties, fasteners, supports, etc.) |
-
----
-
-## 4. Submittals Required
-
-- [ ] Product Data: (list items)
-- [ ] Shop Drawings: (list items)
-- [ ] Samples: (list items WITH sizes if specified)
-- [ ] Certificates: (list items)
-- [ ] Test Reports: (list items)
-
----
-
-## 5. Coordination With Other Trades
-
-| Item | Section | Provided By | Installed By |
-|------|---------|-------------|--------------|
-| (list all cross-references) |
-
----
-
-## 6. Execution Requirements
-
-### Quality/Testing
-- (list specific tests, inspections, tolerances)
-
-### Environmental Limits
-- (temperature, humidity, curing requirements)
-
-### Prohibited Items
-- (list anything explicitly NOT allowed)
-
----
-
-CRITICAL RULES:
-1. The "CRITICAL BID ITEMS" section is MOST IMPORTANT - contractors read this first
-2. If a specific manufacturer is named, it's critical - note if "or equal" is allowed
-3. ANY color, finish, or texture specification is critical
-4. Stainless steel, special coatings, seismic requirements = premium cost items
-5. DO NOT SUMMARIZE - list every specific product/material
-6. Include COMPLETE specification references (full ASTM with type/grade)
-7. Leave sections empty if not found - don't make things up
-8. DO NOT repeat content - if you've listed something once, don't list it again"""
+{base_prompt}"""
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
