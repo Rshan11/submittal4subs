@@ -1070,6 +1070,27 @@ window.downloadPDF = downloadPDF;
 // ============================================================================
 
 function startNewAnalysis() {
+  // If we have a parsed spec, go back to division selection instead of upload
+  if (
+    currentSpecId &&
+    parseResult &&
+    parseResult.divisions &&
+    parseResult.divisions.length > 0
+  ) {
+    analysisResult = null;
+    selectedDivision = null;
+
+    // Reset division dropdown selection but keep the options
+    if (divisionSelect) {
+      divisionSelect.value = "";
+    }
+
+    // Show division section
+    showSection("division");
+    return;
+  }
+
+  // Otherwise, full reset to upload
   clearFile();
   analysisResult = null;
   currentSpecId = null;
@@ -1108,6 +1129,9 @@ function showSection(section) {
       break;
     case "error":
       errorSection.style.display = "block";
+      break;
+    case "division":
+      if (divisionSection) divisionSection.style.display = "block";
       break;
   }
 }
