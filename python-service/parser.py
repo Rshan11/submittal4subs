@@ -5,21 +5,28 @@ Four-tier approach to page classification:
 0. PDF Outline/Bookmarks (most accurate - built into PDF)
 1. TOC Text Parsing (when PDF has no outline but has text TOC with page numbers)
 2. Footer Pattern Matching (section - page number format)
-3. Keyword Fallback (trade-specific terms)
+3. AI Header Scan (Gemini classifies page headers when tiers 0-2 fail)
 
 Each page is processed and tagged with its section number.
 The classification_method field tracks which tier was used:
 - 'outline' = PDF built-in bookmarks/outline
 - 'toc' = Text-based TOC parsing
 - 'footer' = Header/footer pattern matching
-- 'keyword' = Trade keyword fallback
+- 'ai' = AI header classification (Gemini)
 """
 
 import gc
+import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import fitz  # PyMuPDF
+import httpx
+
+# Gemini API for AI fallback classification
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
 
 # ═══════════════════════════════════════════════════════════════
 # CONSTANTS
@@ -895,12 +902,180 @@ def extract_section_from_footer(text: str) -> Tuple[Optional[str], Optional[str]
 
 
 # ═══════════════════════════════════════════════════════════════
-# TIER 3: KEYWORD FALLBACK
+# TIER 3: AI HEADER CLASSIFICATION (Replaces keyword fallback)
 # ═══════════════════════════════════════════════════════════════
 
+# Batch size for AI classification (to stay within token limits)
+AI_BATCH_SIZE = 100
 
+
+def ai_classify_pages(pages: List[dict]) -> List[str]:
+    """
+    Send first 150-200 chars of each page to Gemini for division classification.
+
+    This is the final fallback when outline, TOC, and footer patterns all fail.
+    Only called for pages that couldn't be classified by other methods.
+
+    Returns: List of 2-digit division codes in page order (e.g., ["01", "23", "04"])
+    """
+    import asyncio
+
+    if not GEMINI_API_KEY:
+        print("[PARSE] AI fallback: No GEMINI_API_KEY configured, skipping")
+        return ["01"] * len(pages)
+
+    if not pages:
+        return []
+
+    print(f"[PARSE] AI fallback: Classifying {len(pages)} unclassified pages...")
+
+    # Run async classification
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    try:
+        results = loop.run_until_complete(_ai_classify_pages_async(pages))
+        return results
+    except Exception as e:
+        print(f"[PARSE] AI fallback failed: {e}")
+        return ["01"] * len(pages)
+
+
+async def _ai_classify_pages_async(pages: List[dict]) -> List[str]:
+    """
+    Async implementation of AI page classification.
+    Processes pages in batches to stay within API limits.
+    """
+    all_results = []
+    total_pages = len(pages)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for batch_start in range(0, total_pages, AI_BATCH_SIZE):
+            batch_end = min(batch_start + AI_BATCH_SIZE, total_pages)
+            batch = pages[batch_start:batch_end]
+
+            print(f"[PARSE] AI batch {batch_start + 1}-{batch_end} of {total_pages}...")
+
+            # Build prompt with page headers
+            prompt = """You are classifying construction specification pages by CSI MasterFormat division.
+
+For each page header below, return the 2-digit division code (00-48).
+- Look for "SECTION XX YY ZZ" patterns - first 2 digits are the division
+- Look for "DIVISION XX" patterns
+- Look for section footers like "XX XX XX - 1" where XX is the division
+- Common divisions: 03=Concrete, 04=Masonry, 05=Steel, 06=Wood, 07=Thermal/Roofing, 08=Doors/Windows, 09=Finishes, 22=Plumbing, 23=HVAC, 26=Electrical
+- If unclear or blank page, return "01" as default
+
+Return ONLY a JSON array of 2-digit strings in order. Example: ["01", "01", "23", "23", "07"]
+
+PAGE HEADERS:
+"""
+            for i, page in enumerate(batch):
+                page_num = page.get("page_number", batch_start + i + 1)
+                content = page.get("content", "")
+                # First 200 chars of each page as header
+                header = content[:200].replace("\n", " ").strip()
+                prompt += f"Page {page_num}: {header}\n"
+
+            # Call Gemini API
+            try:
+                response = await client.post(
+                    f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0,
+                            "maxOutputTokens": 2000,
+                        },
+                    },
+                )
+
+                if response.status_code != 200:
+                    print(
+                        f"[PARSE] AI API error {response.status_code}: {response.text[:200]}"
+                    )
+                    all_results.extend(["01"] * len(batch))
+                    continue
+
+                data = response.json()
+                result_text = (
+                    data.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "[]")
+                )
+
+                # Parse JSON response
+                batch_results = _parse_ai_response(result_text, len(batch))
+                all_results.extend(batch_results)
+
+            except Exception as e:
+                print(f"[PARSE] AI batch error: {e}")
+                all_results.extend(["01"] * len(batch))
+
+    return all_results
+
+
+def _parse_ai_response(response_text: str, expected_length: int) -> List[str]:
+    """
+    Parse AI response and validate division codes.
+    Returns list of valid 2-digit division codes.
+    """
+    # Try to extract JSON array from response
+    try:
+        # Clean up response - find JSON array
+        text = response_text.strip()
+
+        # Find array bounds
+        start_idx = text.find("[")
+        end_idx = text.rfind("]")
+
+        if start_idx == -1 or end_idx == -1:
+            print(f"[PARSE] AI response not JSON array: {text[:100]}")
+            return ["01"] * expected_length
+
+        json_str = text[start_idx : end_idx + 1]
+        results = json.loads(json_str)
+
+        if not isinstance(results, list):
+            print(f"[PARSE] AI response not a list")
+            return ["01"] * expected_length
+
+        # Validate length
+        if len(results) != expected_length:
+            print(
+                f"[PARSE] AI response length mismatch: got {len(results)}, expected {expected_length}"
+            )
+            # If we got some results, pad or truncate
+            if len(results) < expected_length:
+                results.extend(["01"] * (expected_length - len(results)))
+            else:
+                results = results[:expected_length]
+
+        # Validate each division code
+        validated = []
+        for code in results:
+            code_str = str(code).zfill(2)[:2]
+            if code_str in VALID_DIVISIONS:
+                validated.append(code_str)
+            else:
+                validated.append("01")  # Default for invalid codes
+
+        return validated
+
+    except json.JSONDecodeError as e:
+        print(f"[PARSE] AI JSON parse error: {e}")
+        return ["01"] * expected_length
+
+
+# Legacy keyword fallback (disabled - replaced by AI)
 def classify_by_keywords(text: str) -> Optional[str]:
     """
+    DEPRECATED: Replaced by AI header classification.
+
     Fallback: classify page by trade-specific keywords.
     Only use when TOC and footer detection fail.
 
@@ -965,7 +1140,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     0. Try PDF outline/bookmarks first (most reliable)
     1. Try text-based TOC parsing
     2. Fall back to footer pattern matching
-    3. Use keyword classification as last resort
+    3. AI header classification (Gemini) when tiers 0-2 fail
 
     Returns dict with pages ready for database insert.
     """
@@ -1057,7 +1232,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             page["division_code"] = division
             page["classification_method"] = "footer"
 
-    # TIER 3: Inherit from previous page (section continuity)
+    # Inheritance pass (section continuity)
     # If a page has no classification but the previous page does,
     # it's likely a continuation of the same section
     prev_section = None
@@ -1073,8 +1248,55 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             page["division_code"] = prev_division
             page["classification_method"] = "inherit"
 
-    # NOTE: Keyword fallback disabled - causes too many false positives
-    # (e.g., Concrete Repair mentioning "masonry" gets tagged as Div 04)
+    # TIER 3: AI Header Classification
+    # If we still have many unclassified pages, use Gemini to classify them
+    # This replaces the old keyword fallback which had too many false positives
+    unclassified_pages = [p for p in pages if p["division_code"] is None]
+
+    if unclassified_pages:
+        # Check if we have enough classified pages already (threshold: 50%)
+        classified_count = len(pages) - len(unclassified_pages)
+        classified_ratio = classified_count / len(pages) if pages else 0
+
+        # Only use AI if less than 50% of pages are classified
+        # (otherwise inheritance should have worked well)
+        if classified_ratio < 0.5:
+            print(
+                f"[PARSE] Only {classified_ratio:.0%} classified - triggering AI fallback"
+            )
+            ai_divisions = ai_classify_pages(unclassified_pages)
+
+            # Apply AI classifications
+            for page, division_code in zip(unclassified_pages, ai_divisions):
+                page["division_code"] = division_code
+                page["section_number"] = f"{division_code} 00 00"  # Generic section
+                page["classification_method"] = "ai"
+
+            ai_classified = sum(
+                1 for p in pages if p.get("classification_method") == "ai"
+            )
+            print(f"[PARSE] AI classified {ai_classified} pages")
+
+            # Run inheritance again after AI classification to propagate sections
+            prev_section = None
+            prev_division = None
+            for page in pages:
+                if page["classification_method"] == "ai":
+                    # AI-classified page - remember for next
+                    prev_section = page.get("section_number")
+                    prev_division = page["division_code"]
+                elif page["division_code"] is None and prev_division is not None:
+                    # Still unclassified - inherit from AI
+                    page["section_number"] = prev_section
+                    page["division_code"] = prev_division
+                    page["classification_method"] = "inherit"
+                elif page["division_code"] is not None:
+                    prev_section = page.get("section_number")
+                    prev_division = page["division_code"]
+        else:
+            print(
+                f"[PARSE] {classified_ratio:.0%} already classified - skipping AI fallback"
+            )
 
     # Extract cross-references for all pages
     for page in pages:
@@ -1109,6 +1331,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     toc_page_classified = sum(
         1 for p in pages if p.get("classification_method") == "toc_page"
     )
+    ai_classified = sum(1 for p in pages if p.get("classification_method") == "ai")
     unclassified = len(pages) - classified
 
     print("[PARSE] Classification summary:")
@@ -1120,6 +1343,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     print(f"[PARSE]     - By text TOC: {toc_classified}")
     print(f"[PARSE]     - By Index: {index_classified}")
     print(f"[PARSE]     - By footer: {footer_classified}")
+    print(f"[PARSE]     - By AI header scan: {ai_classified}")
     print(f"[PARSE]     - By inherit: {inherit_classified}")
     print(f"[PARSE]     - TOC/index pages (Div 00): {toc_page_classified}")
     print(f"[PARSE]   Unclassified: {unclassified}")
@@ -1190,6 +1414,7 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             "toc": toc_classified,
             "index": index_classified,
             "footer": footer_classified,
+            "ai": ai_classified,
             "inherit": inherit_classified,
             "toc_page": toc_page_classified,
             "unclassified": unclassified,
