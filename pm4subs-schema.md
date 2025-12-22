@@ -1,6 +1,6 @@
 # PM4Subs Database Schema
 
-Last updated: 2025-12-07
+Last updated: 2025-12-22
 
 ## Authentication & Users
 
@@ -206,25 +206,106 @@ Custom dropdown values per company.
 
 ---
 
-## Spec Analyzer (Current - To Be Replaced)
+## Spec Analyzer (Current Architecture)
 
-### spec_analyses
+Last updated: 2025-12-22
+
+The spec analyzer uses a **page-level architecture** where each PDF page is individually tagged with its section/division.
+
+### specs
+Master record for each uploaded PDF specification.
+
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | gen_random_uuid() | PK |
-| user_email | text | NO | | OLD - needs user_id |
 | user_id | uuid | YES | | FK to auth.users |
 | job_id | uuid | YES | | FK to jobs |
-| filename | text | YES | | |
-| file_name | text | YES | | Duplicate |
-| page_count | integer | YES | | |
-| trade | text | YES | | |
-| analysis_type | text | YES | | |
-| analysis_result | jsonb | YES | | |
-| status | text | YES | 'processing' | |
-| created_at | timestamp | YES | now() | |
+| r2_key | text | NO | | Cloudflare R2 storage path |
+| original_name | text | YES | | Original filename |
+| page_count | integer | YES | | Total pages in PDF |
+| status | text | YES | 'uploaded' | uploaded/processing/ready/failed |
+| created_at | timestamptz | YES | now() | |
 
-### spec_indices
+### spec_pages
+Individual pages extracted from PDFs with classification metadata.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | uuid | NO | gen_random_uuid() | PK |
+| spec_id | uuid | NO | | FK to specs |
+| page_number | integer | NO | | 1-indexed page number |
+| section_number | varchar | YES | | e.g., "04 22 00" |
+| division_code | varchar | YES | | e.g., "04" (first 2 digits) |
+| content | text | NO | | Extracted text content |
+| char_count | integer | YES | | Length of content |
+| cross_refs | text[] | YES | | Array of referenced sections |
+| classification_method | varchar | YES | | outline/toc/footer/ai/inherit |
+| created_at | timestamptz | YES | now() | |
+
+**Classification methods:**
+- `outline` - From PDF bookmarks/outline
+- `toc` - From text-based Table of Contents
+- `footer` - From page header/footer pattern matching
+- `ai` - From Gemini AI header classification
+- `inherit` - Inherited from previous page (section continuation)
+- `content` - Content override of outline assignment
+
+### spec_analyses
+Stored AI analysis results for each division.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | uuid | NO | gen_random_uuid() | PK |
+| spec_id | uuid | NO | | FK to specs |
+| job_id | uuid | YES | | FK to jobs |
+| division_code | text | NO | | e.g., "04" |
+| analysis_type | text | YES | 'trade' | trade/section_by_section |
+| result | jsonb | YES | | AI analysis result |
+| processing_time_ms | integer | YES | | |
+| created_at | timestamptz | YES | now() | |
+
+### spec_tiles (LEGACY)
+Tile-based chunking - kept for backward compatibility but not actively used.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | uuid | NO | gen_random_uuid() | PK |
+| spec_id | uuid | YES | | FK to specs |
+| division_code | text | YES | | |
+| section_number | text | YES | | |
+| section_title | text | YES | | |
+| part | text | YES | | PART 1/2/3 |
+| page_from | integer | YES | | |
+| page_to | integer | YES | | |
+| tile_index | integer | YES | | |
+| content | text | YES | | |
+| cross_refs | text[] | YES | | |
+| created_at | timestamptz | YES | now() | |
+
+### jobs
+Processing jobs for spec analyzer workflow.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| id | uuid | NO | gen_random_uuid() | PK |
+| user_id | uuid | YES | | FK to auth.users |
+| job_name | text | NO | 'phase1_extract' | |
+| status | text | YES | 'active' | active/completed/failed |
+| file_hash | text | YES | | For caching |
+| trade_type | text | YES | 'masonry' | |
+| file_path | text | YES | | |
+| result | jsonb | YES | | |
+| payload | jsonb | YES | '{}' | |
+| created_at | timestamptz | YES | now() | |
+| updated_at | timestamptz | YES | now() | |
+
+---
+
+## Spec Analyzer (Legacy Tables - Deprecated)
+
+These tables are from older versions and may be removed in future cleanup.
+
+### spec_indices (DEPRECATED)
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | gen_random_uuid() | PK |
@@ -236,24 +317,7 @@ Custom dropdown values per company.
 | sections | jsonb | NO | | |
 | created_at | timestamptz | YES | now() | |
 
-### jobs
-Used by spec analyzer for processing status.
-
-| Column | Type | Nullable | Default | Notes |
-|--------|------|----------|---------|-------|
-| id | uuid | NO | gen_random_uuid() | PK |
-| user_id | uuid | YES | | FK to auth.users |
-| job_name | text | NO | 'phase1_extract' | |
-| status | text | YES | 'active' | |
-| file_hash | text | YES | | |
-| trade_type | text | YES | 'masonry' | |
-| file_path | text | YES | | |
-| result | jsonb | YES | | |
-| payload | jsonb | YES | '{}' | |
-| created_at | timestamptz | YES | now() | |
-| updated_at | timestamptz | YES | now() | |
-
-### document_indexes
+### document_indexes (DEPRECATED)
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | uuid_generate_v4() | PK |
@@ -268,7 +332,7 @@ Used by spec analyzer for processing status.
 | created_at | timestamptz | YES | now() | |
 | last_used_at | timestamptz | YES | now() | |
 
-### phase1_extractions
+### phase1_extractions (DEPRECATED)
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | gen_random_uuid() | PK |
@@ -277,7 +341,7 @@ Used by spec analyzer for processing status.
 | extracted_data | jsonb | NO | | |
 | created_at | timestamptz | YES | now() | |
 
-### phase2_materials
+### phase2_materials (DEPRECATED)
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | gen_random_uuid() | PK |
@@ -289,7 +353,7 @@ Used by spec analyzer for processing status.
 | created_at | timestamptz | YES | now() | |
 | updated_at | timestamptz | YES | now() | |
 
-### phase0_analytics
+### phase0_analytics (DEPRECATED)
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
 | id | uuid | NO | uuid_generate_v4() | PK |
