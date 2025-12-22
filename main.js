@@ -98,6 +98,7 @@ async function checkForExistingSpec(jobId) {
 
     console.log("[SPEC] Found existing spec:", existingSpec);
     currentSpecId = existingSpec.id;
+    currentSpecName = existingSpec.original_name || "Specification";
 
     // Load divisions from spec_pages
     const divisions = await loadDivisionsFromDatabase(existingSpec.id);
@@ -194,6 +195,7 @@ if (navLogoutBtn) {
 }
 
 let currentFile = null;
+let currentSpecName = null; // Track spec name for existing specs
 let analysisResult = null;
 let selectedDivision = null;
 let analysisStartTime = null;
@@ -619,7 +621,10 @@ async function analyzeSelectedDivision() {
       currentSpecId,
       selectedDivision,
       true, // include contract terms
-      currentFile.name.replace(".pdf", ""),
+      (currentFile?.name || currentSpecName || "Specification").replace(
+        ".pdf",
+        "",
+      ),
     );
     console.log("[API] Analysis complete:", analysisResponse);
 
@@ -672,7 +677,7 @@ async function analyzeSelectedDivision() {
       metadata: {
         division: selectedDivision,
         divisionName: getDivisionName(selectedDivision),
-        project: currentFile.name,
+        project: currentFile?.name || currentSpecName || "Specification",
         processingTimeMs: analysisResponse.processing_time_ms,
         pageCount: parseResult?.page_count || 0,
         divisionCount: parseResult?.division_count || 0,
@@ -1084,11 +1089,12 @@ async function downloadPDF() {
     updateLoadingStatus("Generating professional PDF report...", 50);
     showSection("loading");
 
+    const specName = currentFile?.name || currentSpecName || "Specification";
     const analysisData = {
-      projectName: currentFile.name.replace(".pdf", ""),
+      projectName: specName.replace(".pdf", ""),
       companyName: "Company Name",
       trade: selectedTrade,
-      filename: currentFile.name,
+      filename: specName,
       analyzedDate: new Date().toISOString(),
       contractAnalysis: {
         division00: analysisResult.contract,
