@@ -411,9 +411,221 @@ company_id = ANY(
 
 ---
 
+## Indexes
+
+### Spec Analyzer Indexes
+```sql
+-- For efficient RLS queries on specs
+CREATE INDEX idx_specs_company_id ON specs(company_id);
+
+-- For linking proposals to specs
+CREATE INDEX idx_proposals_spec_id ON proposals(spec_id);
+```
+
+---
+
+## Row Level Security (RLS)
+
+### Spec Analyzer RLS Policies
+
+RLS is enabled on the core spec analyzer tables to enforce company-based access control.
+
+#### specs table
+
+```sql
+ALTER TABLE specs ENABLE ROW LEVEL SECURITY;
+
+-- Users can SELECT specs belonging to their companies (or their own if no company)
+CREATE POLICY "Users can view own company specs" ON specs
+  FOR SELECT USING (
+    company_id IN (
+      SELECT ucm.company_id 
+      FROM user_company_memberships ucm
+      JOIN user_profiles up ON up.id = ucm.user_profile_id
+      WHERE up.user_id = auth.uid()
+    )
+    OR (company_id IS NULL AND user_id = auth.uid())
+  );
+
+-- Users can INSERT specs for their companies
+CREATE POLICY "Users can insert specs for their company" ON specs
+  FOR INSERT WITH CHECK (
+    company_id IN (
+      SELECT ucm.company_id 
+      FROM user_company_memberships ucm
+      JOIN user_profiles up ON up.id = ucm.user_profile_id
+      WHERE up.user_id = auth.uid()
+    )
+    OR company_id IS NULL
+  );
+
+-- Users can UPDATE their company's specs
+CREATE POLICY "Users can update own company specs" ON specs
+  FOR UPDATE USING (
+    company_id IN (
+      SELECT ucm.company_id 
+      FROM user_company_memberships ucm
+      JOIN user_profiles up ON up.id = ucm.user_profile_id
+      WHERE up.user_id = auth.uid()
+    )
+    OR (company_id IS NULL AND user_id = auth.uid())
+  );
+
+-- Users can DELETE their company's specs
+CREATE POLICY "Users can delete own company specs" ON specs
+  FOR DELETE USING (
+    company_id IN (
+      SELECT ucm.company_id 
+      FROM user_company_memberships ucm
+      JOIN user_profiles up ON up.id = ucm.user_profile_id
+      WHERE up.user_id = auth.uid()
+    )
+    OR (company_id IS NULL AND user_id = auth.uid())
+  );
+
+-- Service role bypass for backend operations
+CREATE POLICY "Service role full access to specs" ON specs
+  FOR ALL USING (auth.role() = 'service_role');
+```
+
+#### spec_analyses table
+
+```sql
+ALTER TABLE spec_analyses ENABLE ROW LEVEL SECURITY;
+
+-- Access based on parent spec's company
+CREATE POLICY "Users can view analyses for their specs" ON spec_analyses
+  FOR SELECT USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can insert analyses for their specs" ON spec_analyses
+  FOR INSERT WITH CHECK (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR s.company_id IS NULL
+    )
+  );
+
+CREATE POLICY "Users can update analyses for their specs" ON spec_analyses
+  FOR UPDATE USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can delete analyses for their specs" ON spec_analyses
+  FOR DELETE USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Service role full access to spec_analyses" ON spec_analyses
+  FOR ALL USING (auth.role() = 'service_role');
+```
+
+#### spec_pages table
+
+```sql
+ALTER TABLE spec_pages ENABLE ROW LEVEL SECURITY;
+
+-- Access based on parent spec's company
+CREATE POLICY "Users can view pages for their specs" ON spec_pages
+  FOR SELECT USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can insert pages for their specs" ON spec_pages
+  FOR INSERT WITH CHECK (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR s.company_id IS NULL
+    )
+  );
+
+CREATE POLICY "Users can update pages for their specs" ON spec_pages
+  FOR UPDATE USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Users can delete pages for their specs" ON spec_pages
+  FOR DELETE USING (
+    spec_id IN (
+      SELECT s.id FROM specs s
+      WHERE s.company_id IN (
+        SELECT ucm.company_id 
+        FROM user_company_memberships ucm
+        JOIN user_profiles up ON up.id = ucm.user_profile_id
+        WHERE up.user_id = auth.uid()
+      )
+      OR (s.company_id IS NULL AND s.user_id = auth.uid())
+    )
+  );
+
+CREATE POLICY "Service role full access to spec_pages" ON spec_pages
+  FOR ALL USING (auth.role() = 'service_role');
+```
+
+---
+
 ## Notes
 
 1. **user_company_memberships** uses `user_profile_id` (NOT `user_id` directly)
 2. **user_company_cache** stores denormalized company_ids array for faster RLS
 3. Some tables have both `user_id` (auth.users) and legacy patterns
-4. Spec analyzer tables need migration to add company_id and proper RLS
+4. **Spec analyzer RLS** - specs, spec_analyses, and spec_pages now have company-based RLS
+5. **Fallback for null company_id** - Policies allow access if `company_id IS NULL AND user_id = auth.uid()` (for legacy or personal specs)
