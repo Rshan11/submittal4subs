@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Upload Spec - PM4Subs</title>
+        <title>Upload Spec - PM4Subs Spec Analyzer</title>
         <link
             rel="icon"
             href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
@@ -19,29 +19,10 @@
         <link rel="stylesheet" href="assets/css/tailwind-input.css" />
         <link rel="stylesheet" href="style.css" />
     </head>
-    <body>
-        <!-- Navigation Header -->
-        <header class="top-nav-bar">
-            <div class="nav-container">
-                <div class="nav-left">
-                    <a href="/dashboard.html" class="logo-link">
-                        <span class="logo-text">PM4Subs</span>
-                        <span class="beta-pill">Beta</span>
-                    </a>
-                </div>
-                <div class="nav-right">
-                    <a href="/dashboard.html" class="nav-link-back"
-                        >Dashboard</a
-                    >
-                    <span class="nav-user-email" id="navUserEmail"></span>
-                    <button class="btn-nav-logout" id="navLogoutBtn">
-                        Sign Out
-                    </button>
-                </div>
-            </div>
-        </header>
+    <body class="bg-brand-bg min-h-screen">
+        <!-- Header injected by shared-header.js -->
 
-        <div class="container">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 py-6">
             <main>
                 <!-- Upload Section -->
                 <section class="card" id="uploadSection">
@@ -135,10 +116,7 @@
                             <ul id="analysesList"></ul>
                         </div>
 
-                        <div
-                            class="file-actions"
-                            style="margin-top: var(--space-md)"
-                        >
+                        <div class="file-actions mt-4">
                             <button class="btn btn-primary" id="analyzeBtn">
                                 Analyze Division
                             </button>
@@ -226,6 +204,8 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
+        <!-- Shared Header -->
+        <script type="module" src="/lib/shared-header.js"></script>
         <script type="module" src="/main.js"></script>
     </body>
 </html>

@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Job Analyses - PM4Subs</title>
+        <title>Job Analyses - PM4Subs Spec Analyzer</title>
         <link
             rel="icon"
             href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>"
@@ -18,29 +18,10 @@
         <link rel="stylesheet" href="assets/css/tailwind-input.css" />
         <link rel="stylesheet" href="style.css" />
     </head>
-    <body>
-        <!-- Navigation -->
-        <header class="top-nav-bar">
-            <div class="nav-container">
-                <div class="nav-left">
-                    <a href="/dashboard.html" class="logo-link">
-                        <span class="logo-text">PM4Subs</span>
-                        <span class="beta-pill">Beta</span>
-                    </a>
-                </div>
-                <div class="nav-right">
-                    <a href="/dashboard.html" class="nav-link-back"
-                        >Back to Dashboard</a
-                    >
-                    <span class="nav-user-email" id="navUserEmail"></span>
-                    <button class="btn-nav-logout" id="navLogoutBtn">
-                        Sign Out
-                    </button>
-                </div>
-            </div>
-        </header>
+    <body class="bg-brand-bg min-h-screen">
+        <!-- Header injected by shared-header.js -->
 
-        <div class="container" style="max-width: 1200px">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
             <!-- Page Header -->
             <div class="page-header">
                 <div class="page-header-content">
@@ -66,6 +47,8 @@
             </div>
         </div>
 
+        <!-- Shared Header -->
+        <script type="module" src="/lib/shared-header.js"></script>
         <script type="module" src="job-analyses.js"></script>
     </body>
 </html>
