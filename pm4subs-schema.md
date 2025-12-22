@@ -27,7 +27,7 @@ Links auth.users to app-level profile data.
 | permissions | jsonb | YES | '{}' | |
 
 ### user_company_memberships
-**This is how users are linked to companies** (many-to-many).
+**This is how users are linked to companies** (many-to-many). Also handles pending invites.
 
 | Column | Type | Nullable | Default | Notes |
 |--------|------|----------|---------|-------|
@@ -36,6 +36,10 @@ Links auth.users to app-level profile data.
 | company_id | uuid | NO | | FK to companies.id |
 | role | text | NO | 'member' | |
 | permissions | jsonb | YES | '{}' | |
+| invite_token | text | YES | | UNIQUE - for invite links |
+| invite_email | text | YES | | Email invite was sent to |
+| invited_at | timestamptz | YES | | When invite was sent |
+| accepted_at | timestamptz | YES | | When user accepted |
 | created_at | timestamptz | YES | now() | |
 | updated_at | timestamptz | YES | now() | |
 
@@ -412,6 +416,12 @@ company_id = ANY(
 ---
 
 ## Indexes
+
+### User & Company Indexes
+```sql
+-- For invite token lookups
+CREATE INDEX idx_ucm_invite_token ON user_company_memberships(invite_token);
+```
 
 ### Spec Analyzer Indexes
 ```sql
