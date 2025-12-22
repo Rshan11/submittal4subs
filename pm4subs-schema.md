@@ -141,6 +141,7 @@ Custom dropdown values per company.
 | id | uuid | NO | uuid_generate_v4() | PK |
 | user_id | uuid | YES | | FK to auth.users |
 | company_id | uuid | YES | | FK to companies.id |
+| spec_id | uuid | YES | | FK to specs (spec used for bidding) |
 | proposal_number | text | NO | | |
 | proposal_date | date | YES | | |
 | valid_until | date | YES | | |
@@ -220,6 +221,7 @@ Master record for each uploaded PDF specification.
 | id | uuid | NO | gen_random_uuid() | PK |
 | user_id | uuid | YES | | FK to auth.users |
 | job_id | uuid | YES | | FK to jobs |
+| company_id | uuid | YES | | FK to companies (for RLS) |
 | r2_key | text | NO | | Cloudflare R2 storage path |
 | original_name | text | YES | | Original filename |
 | page_count | integer | YES | | Total pages in PDF |
