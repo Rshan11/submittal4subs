@@ -40,6 +40,81 @@
 }
 
 /* ============================================
+   RELATED SECTIONS (Cross-references)
+   ============================================ */
+
+.related-sections {
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    background: var(--warning-bg, #fffbeb);
+    border-radius: var(--radius-btn);
+    border: 1px solid var(--warning-border, #fcd34d);
+}
+
+.related-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-sm);
+}
+
+.related-header h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.related-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.related-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.related-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.related-item:hover {
+    background: var(--bg-hover, #f5f5f5);
+}
+
+.related-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.section-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-number {
+    font-family: monospace;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.section-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ============================================
    PREVIOUS ANALYSES BOX
    ============================================ */
 

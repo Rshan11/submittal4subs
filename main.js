@@ -274,6 +274,9 @@ function init() {
   }
 }
 
+// Track selected related sections for analysis
+let selectedRelatedSections = [];
+
 // Load section preview for selected division (free feature)
 async function loadSectionPreview(divisionCode) {
   const previewDiv = document.getElementById("sectionPreview");
@@ -317,10 +320,112 @@ async function loadSectionPreview(divisionCode) {
     }
 
     previewDiv.style.display = "block";
+
+    // Also load related sections from cross-references
+    await loadRelatedSections(divisionCode);
   } catch (err) {
     console.error("[PREVIEW] Error loading section preview:", err);
     hideSectionPreview();
   }
+}
+
+// Load related sections that are cross-referenced by this division
+async function loadRelatedSections(divisionCode) {
+  const relatedDiv = document.getElementById("relatedSections");
+
+  // Create the related sections container if it doesn't exist
+  let container = relatedDiv;
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "relatedSections";
+    container.className = "related-sections";
+    const previewDiv = document.getElementById("sectionPreview");
+    if (previewDiv) {
+      previewDiv.parentNode.insertBefore(container, previewDiv.nextSibling);
+    }
+  }
+
+  try {
+    const response = await fetch(
+      `${PYTHON_API}/spec/${currentSpecId}/division/${divisionCode}/related`,
+    );
+
+    if (!response.ok) {
+      container.style.display = "none";
+      return;
+    }
+
+    const data = await response.json();
+    const related = data.related_sections || [];
+
+    if (related.length === 0) {
+      container.style.display = "none";
+      selectedRelatedSections = [];
+      return;
+    }
+
+    // Filter to most relevant (top 10, with at least 2 references)
+    const relevantSections = related
+      .filter((s) => s.reference_count >= 1)
+      .slice(0, 10);
+
+    if (relevantSections.length === 0) {
+      container.style.display = "none";
+      selectedRelatedSections = [];
+      return;
+    }
+
+    // Pre-select all by default
+    selectedRelatedSections = relevantSections.map((s) => s.section_number);
+
+    container.innerHTML = `
+      <div class="related-header">
+        <h4>Related Sections (cross-referenced)</h4>
+        <span class="related-hint">Include these in your analysis:</span>
+      </div>
+      <div class="related-list">
+        ${relevantSections
+          .map(
+            (s) => `
+          <label class="related-item">
+            <input type="checkbox"
+                   value="${s.section_number}"
+                   checked
+                   onchange="toggleRelatedSection('${s.section_number}', this.checked)">
+            <span class="section-info">
+              <span class="section-number">${s.section_number}</span>
+              <span class="section-meta">(${s.page_count} pages, ${s.reference_count} refs)</span>
+            </span>
+          </label>
+        `,
+          )
+          .join("")}
+      </div>
+    `;
+
+    container.style.display = "block";
+    console.log(
+      `[RELATED] Found ${relevantSections.length} related sections for Division ${divisionCode}`,
+    );
+  } catch (err) {
+    console.error("[RELATED] Error loading related sections:", err);
+    container.style.display = "none";
+    selectedRelatedSections = [];
+  }
+}
+
+// Toggle a related section on/off
+function toggleRelatedSection(sectionNumber, isChecked) {
+  if (isChecked) {
+    if (!selectedRelatedSections.includes(sectionNumber)) {
+      selectedRelatedSections.push(sectionNumber);
+    }
+  } else {
+    selectedRelatedSections = selectedRelatedSections.filter(
+      (s) => s !== sectionNumber,
+    );
+  }
+  console.log("[RELATED] Selected sections:", selectedRelatedSections);
 }
 
 function hideSectionPreview() {
@@ -617,6 +722,14 @@ async function analyzeSelectedDivision() {
     }
     console.log(`[API] Analyzing Division ${selectedDivision}...`);
 
+    // Log related sections being included
+    if (selectedRelatedSections.length > 0) {
+      console.log(
+        `[API] Including ${selectedRelatedSections.length} related sections:`,
+        selectedRelatedSections,
+      );
+    }
+
     const analysisResponse = await analyzeSpec(
       currentSpecId,
       selectedDivision,
@@ -625,6 +738,7 @@ async function analyzeSelectedDivision() {
         ".pdf",
         "",
       ),
+      selectedRelatedSections, // pass related sections
     );
     console.log("[API] Analysis complete:", analysisResponse);
 

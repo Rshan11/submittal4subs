@@ -188,6 +188,79 @@ def get_division_summary(spec_id: str) -> List[Dict[str, Any]]:
     return result_list
 
 
+def get_related_sections(spec_id: str, division_code: str) -> List[Dict[str, Any]]:
+    """
+    Get sections from OTHER divisions that are cross-referenced by this division.
+    Used to show related specs (e.g., Masonry referencing Joint Sealants).
+
+    Returns list of dicts with:
+    - section_number: e.g., "07 92 00"
+    - division_code: e.g., "07"
+    - page_count: number of pages in that section
+    - reference_count: how many times this section is referenced
+    """
+    client = get_supabase()
+
+    # Get all cross_refs from pages in this division
+    result = (
+        client.table("spec_pages")
+        .select("cross_refs")
+        .eq("spec_id", spec_id)
+        .eq("division_code", division_code)
+        .not_.is_("cross_refs", "null")
+        .execute()
+    )
+
+    if not result.data:
+        return []
+
+    # Count references to each external section
+    ref_counts = {}
+    for row in result.data:
+        refs = row.get("cross_refs") or []
+        for ref in refs:
+            # Skip self-references (same division)
+            if ref.startswith(division_code):
+                continue
+            ref_counts[ref] = ref_counts.get(ref, 0) + 1
+
+    if not ref_counts:
+        return []
+
+    # Get page counts for each referenced section
+    all_sections = list(ref_counts.keys())
+
+    # Query pages for these sections
+    pages_result = (
+        client.table("spec_pages")
+        .select("section_number, division_code, page_number")
+        .eq("spec_id", spec_id)
+        .in_("section_number", all_sections)
+        .execute()
+    )
+
+    # Aggregate by section
+    section_info = {}
+    for row in pages_result.data or []:
+        section = row["section_number"]
+        if section not in section_info:
+            section_info[section] = {
+                "section_number": section,
+                "division_code": row["division_code"],
+                "page_count": 0,
+                "reference_count": ref_counts.get(section, 0),
+            }
+        section_info[section]["page_count"] += 1
+
+    # Sort by reference count (most referenced first)
+    result_list = sorted(
+        section_info.values(),
+        key=lambda x: (-x["reference_count"], x["section_number"]),
+    )
+
+    return result_list
+
+
 def get_sections_for_division(spec_id: str, division_code: str) -> List[Dict[str, Any]]:
     """
     Get all sections within a division, with page counts and content.

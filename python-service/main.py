@@ -17,7 +17,7 @@ Architecture: Page-Level Tagging
 import asyncio
 import os
 import sys
-from typing import Optional
+from typing import List, Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -65,6 +65,7 @@ from db import (
     get_division_summary,
     get_pages_by_division,
     get_pages_by_section,
+    get_related_sections,
     get_sections_for_division,
     get_spec,
     insert_analysis,
@@ -129,6 +130,7 @@ class AnalyzeRequest(BaseModel):
     division: str
     include_contract_terms: bool = True
     project_name: Optional[str] = None
+    related_sections: Optional[List[str]] = None  # Cross-referenced sections to include
 
 
 class AnalyzeResponse(BaseModel):
@@ -427,6 +429,37 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
                     contract_summary_text = contract_analysis.get("summary", "")
                     print(f"[ANALYZE] Contract analysis complete")
 
+            # Add user-selected related sections to the sections list
+            related_section_count = 0
+            if request.related_sections:
+                print(
+                    f"[ANALYZE] Including {len(request.related_sections)} user-selected related sections"
+                )
+                for section_num in request.related_sections:
+                    section_pages = get_pages_by_section(spec_id, section_num)
+                    if section_pages:
+                        # Build section dict matching the expected format
+                        related_content = "\n\n".join(
+                            [
+                                f"--- Page {p['page_number']} ---\n{p['content']}"
+                                for p in sorted(
+                                    section_pages, key=lambda x: x["page_number"]
+                                )
+                            ]
+                        )
+                        sections.append(
+                            {
+                                "section_number": section_num,
+                                "title": f"Related Section {section_num}",
+                                "page_count": len(section_pages),
+                                "content": related_content,
+                            }
+                        )
+                        related_section_count += 1
+                print(
+                    f"[ANALYZE] Added {related_section_count} related sections to analysis"
+                )
+
             # Run section-by-section analysis with contract info
             analysis_result = await analyze_division_by_section(
                 sections=sections,
@@ -440,31 +473,10 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
             if contract_analysis:
                 analysis_result["contract_analysis"] = contract_analysis
 
-            cross_ref_count = 0  # Section analysis handles cross-refs internally
+            cross_ref_count = related_section_count
 
         else:
             print(f"[ANALYZE] Using SINGLE-PASS analysis (small division)")
-
-            # Collect cross-references from those pages
-            all_cross_refs = set()
-            for page in division_pages:
-                refs = page.get("cross_refs") or []
-                all_cross_refs.update(refs)
-
-            # Filter to external refs only (not same division)
-            external_refs = [r for r in all_cross_refs if not r.startswith(division)]
-            print(f"[ANALYZE] Found {len(external_refs)} cross-referenced sections")
-
-            # Fetch cross-referenced pages (limit to top 10 to avoid token explosion)
-            cross_ref_pages = []
-            for ref in sorted(external_refs)[:10]:
-                ref_pages = get_pages_by_section(spec_id, ref)
-                cross_ref_pages.extend(ref_pages)
-
-            if cross_ref_pages:
-                print(f"[ANALYZE] Fetched {len(cross_ref_pages)} cross-ref pages")
-
-            cross_ref_count = len(cross_ref_pages)
 
             # Build division text from pages
             division_text = "\n\n".join(
@@ -474,6 +486,32 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
                 ]
             )
             print(f"[ANALYZE] Division text: {len(division_text):,} chars")
+
+            # Add user-selected related sections
+            related_section_pages = []
+            if request.related_sections:
+                print(
+                    f"[ANALYZE] Including {len(request.related_sections)} user-selected related sections"
+                )
+                for section_num in request.related_sections:
+                    section_pages = get_pages_by_section(spec_id, section_num)
+                    related_section_pages.extend(section_pages)
+
+                if related_section_pages:
+                    related_text = "\n\n".join(
+                        [
+                            f"--- Page {p['page_number']} (Related Section {p['section_number'] or 'unknown'}) ---\n{p['content']}"
+                            for p in sorted(
+                                related_section_pages, key=lambda x: x["page_number"]
+                            )
+                        ]
+                    )
+                    division_text += f"\n\n{'=' * 60}\nRELATED SECTIONS (Cross-Referenced)\n{'=' * 60}\n\n{related_text}"
+                    print(
+                        f"[ANALYZE] Added {len(related_section_pages)} related section pages ({len(related_text):,} chars)"
+                    )
+
+            cross_ref_count = len(related_section_pages)
 
             # Get Division 00/01 for contract terms
             div01_text = None
@@ -634,6 +672,30 @@ async def get_spec_divisions(spec_id: str):
             }
             for d in divisions
         ],
+    }
+
+
+@app.get("/spec/{spec_id}/division/{division}/related")
+async def get_division_related_sections(spec_id: str, division: str):
+    """
+    Get sections from OTHER divisions that are cross-referenced by this division.
+
+    Used to show related specs before analysis, e.g.:
+    - Masonry (04) references Joint Sealants (07 92 00)
+    - Masonry (04) references Product Requirements (01 60 00)
+
+    Returns sections sorted by reference count (most referenced first).
+    """
+    spec = get_spec(spec_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail="Spec not found")
+
+    related = get_related_sections(spec_id, division)
+
+    return {
+        "spec_id": spec_id,
+        "division": division,
+        "related_sections": related,
     }
 
 
