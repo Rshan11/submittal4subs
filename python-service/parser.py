@@ -909,25 +909,26 @@ def extract_section_from_footer(text: str) -> Tuple[Optional[str], Optional[str]
 AI_BATCH_SIZE = 100
 
 
-def ai_classify_pages(pages: List[dict]) -> List[str]:
+def ai_find_section_boundaries(pages: List[dict]) -> List[Tuple[int, str, str]]:
     """
-    Send first 150-200 chars of each page to Gemini for division classification.
+    Use AI to find section start pages, then use boundaries for classification.
 
-    This is the final fallback when outline, TOC, and footer patterns all fail.
-    Only called for pages that couldn't be classified by other methods.
+    Two-phase approach:
+    1. AI scans page headers to find "SECTION XX YY ZZ" patterns
+    2. Use section start pages as boundaries to assign all pages
 
-    Returns: List of 2-digit division codes in page order (e.g., ["01", "23", "04"])
+    Returns: List of (page_number, section_number, division_code) for section starts
     """
     import asyncio
 
     if not GEMINI_API_KEY:
         print("[PARSE] AI fallback: No GEMINI_API_KEY configured, skipping")
-        return ["01"] * len(pages)
+        return []
 
     if not pages:
         return []
 
-    print(f"[PARSE] AI fallback: Classifying {len(pages)} unclassified pages...")
+    print(f"[PARSE] AI fallback: Finding section boundaries in {len(pages)} pages...")
 
     # Run async classification
     try:
@@ -937,19 +938,21 @@ def ai_classify_pages(pages: List[dict]) -> List[str]:
         asyncio.set_event_loop(loop)
 
     try:
-        results = loop.run_until_complete(_ai_classify_pages_async(pages))
-        return results
+        boundaries = loop.run_until_complete(_ai_find_boundaries_async(pages))
+        return boundaries
     except Exception as e:
         print(f"[PARSE] AI fallback failed: {e}")
-        return ["01"] * len(pages)
+        return []
 
 
-async def _ai_classify_pages_async(pages: List[dict]) -> List[str]:
+async def _ai_find_boundaries_async(
+    pages: List[dict],
+) -> List[Tuple[int, str, str]]:
     """
-    Async implementation of AI page classification.
-    Processes pages in batches to stay within API limits.
+    Async implementation: Find section boundaries by scanning page headers.
+    Returns list of (page_number, section_number, division_code) tuples.
     """
-    all_results = []
+    all_boundaries = []
     total_pages = len(pages)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -959,32 +962,29 @@ async def _ai_classify_pages_async(pages: List[dict]) -> List[str]:
 
             print(f"[PARSE] AI batch {batch_start + 1}-{batch_end} of {total_pages}...")
 
-            # Build prompt with page headers
-            prompt = """You are classifying construction specification pages by CSI division.
+            # Build prompt - ask for section headers only
+            prompt = """Find SECTION headers in these construction specification page headers.
 
-CRITICAL: Look ONLY at the "SECTION XX YY ZZ" line in the header.
-- The first 2 digits after "SECTION" are the division code.
-- IGNORE any other division numbers mentioned in body text.
-- IGNORE cross-references like "See Section 23 05 00"
+For each page, if it has a "SECTION XX YY ZZ" header, return: {"page": N, "section": "XX YY ZZ"}
+If no SECTION header, skip that page.
 
-Examples:
-- "SECTION 01 30 00.24" → Division "01"
-- "SECTION 23 05 15" → Division "23"
-- "SECTION 07 21 13" → Division "07"
-- Page mentions "coordinate with Division 23" but header says "SECTION 01 30 00" → Division "01"
+Examples of SECTION headers:
+- "SECTION 01 30 00" -> {"page": 5, "section": "01 30 00"}
+- "SECTION 23 05 15.13" -> {"page": 100, "section": "23 05 15"}
+- "SECTION 07 21 13" -> {"page": 50, "section": "07 21 13"}
 
-If no SECTION header found, return "XX" (unknown).
+IGNORE cross-references like "See Section 23 05 00" - only match actual section title headers.
 
-For each page below, return ONLY the 2-digit division from its SECTION header.
-Return JSON array: ["01", "01", "23", ...]
+Return JSON array of objects for pages WITH section headers only.
+Example: [{"page": 5, "section": "01 30 00"}, {"page": 100, "section": "23 05 15"}]
 
 PAGE HEADERS:
 """
-            for i, page in enumerate(batch):
-                page_num = page.get("page_number", batch_start + i + 1)
+            for page in batch:
+                page_num = page.get("page_number", 0)
                 content = page.get("content", "")
-                # First 200 chars of each page as header
-                header = content[:200].replace("\n", " ").strip()
+                # First 300 chars to catch section header
+                header = content[:300].replace("\n", " ").strip()
                 prompt += f"Page {page_num}: {header}\n"
 
             # Call Gemini API
@@ -995,7 +995,7 @@ PAGE HEADERS:
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
                             "temperature": 0,
-                            "maxOutputTokens": 2000,
+                            "maxOutputTokens": 4000,
                         },
                     },
                 )
@@ -1004,7 +1004,6 @@ PAGE HEADERS:
                     print(
                         f"[PARSE] AI API error {response.status_code}: {response.text[:200]}"
                     )
-                    all_results.extend(["01"] * len(batch))
                     continue
 
                 data = response.json()
@@ -1015,23 +1014,27 @@ PAGE HEADERS:
                     .get("text", "[]")
                 )
 
-                # Parse JSON response
-                batch_results = _parse_ai_response(result_text, len(batch))
-                all_results.extend(batch_results)
+                # Parse boundaries from response
+                batch_boundaries = _parse_boundary_response(result_text)
+                all_boundaries.extend(batch_boundaries)
 
             except Exception as e:
                 print(f"[PARSE] AI batch error: {e}")
-                all_results.extend(["01"] * len(batch))
 
-    return all_results
+    # Sort by page number
+    all_boundaries.sort(key=lambda x: x[0])
+    print(f"[PARSE] AI found {len(all_boundaries)} section boundaries")
+
+    return all_boundaries
 
 
-def _parse_ai_response(response_text: str, expected_length: int) -> List[str]:
+def _parse_boundary_response(response_text: str) -> List[Tuple[int, str, str]]:
     """
-    Parse AI response and validate division codes.
-    Returns list of valid 2-digit division codes.
+    Parse AI response for section boundaries.
+    Returns list of (page_number, section_number, division_code) tuples.
     """
-    # Try to extract JSON array from response
+    boundaries = []
+
     try:
         # Clean up response - find JSON array
         text = response_text.strip()
@@ -1041,43 +1044,74 @@ def _parse_ai_response(response_text: str, expected_length: int) -> List[str]:
         end_idx = text.rfind("]")
 
         if start_idx == -1 or end_idx == -1:
-            print(f"[PARSE] AI response not JSON array: {text[:100]}")
-            return ["01"] * expected_length
+            print(f"[PARSE] AI boundary response not JSON array: {text[:100]}")
+            return []
 
         json_str = text[start_idx : end_idx + 1]
         results = json.loads(json_str)
 
         if not isinstance(results, list):
-            print(f"[PARSE] AI response not a list")
-            return ["01"] * expected_length
+            return []
 
-        # Validate length
-        if len(results) != expected_length:
-            print(
-                f"[PARSE] AI response length mismatch: got {len(results)}, expected {expected_length}"
-            )
-            # If we got some results, pad or truncate
-            if len(results) < expected_length:
-                results.extend(["01"] * (expected_length - len(results)))
-            else:
-                results = results[:expected_length]
+        for item in results:
+            if not isinstance(item, dict):
+                continue
 
-        # Validate each division code
-        validated = []
-        for code in results:
-            code_str = str(code).upper().zfill(2)[:2]
-            if code_str in VALID_DIVISIONS:
-                validated.append(code_str)
-            elif code_str == "XX":
-                validated.append(None)  # Unknown - let inheritance handle it
-            else:
-                validated.append("01")  # Default for invalid codes
+            page_num = item.get("page", 0)
+            section = item.get("section", "")
 
-        return validated
+            if not page_num or not section:
+                continue
+
+            # Extract division code (first 2 digits)
+            section_clean = section.strip()
+            if len(section_clean) >= 2:
+                div_code = section_clean[:2]
+                if div_code in VALID_DIVISIONS:
+                    # Normalize section format
+                    section_normalized = section_clean.replace("  ", " ")
+                    boundaries.append((page_num, section_normalized, div_code))
+
+        return boundaries
 
     except json.JSONDecodeError as e:
-        print(f"[PARSE] AI JSON parse error: {e}")
-        return ["01"] * expected_length
+        print(f"[PARSE] AI boundary JSON parse error: {e}")
+        return []
+
+
+def apply_section_boundaries(
+    pages: List[dict], boundaries: List[Tuple[int, str, str]]
+) -> None:
+    """
+    Apply section boundaries to classify pages.
+
+    Pages between section start N and section start N+1 belong to section N.
+    """
+    if not boundaries:
+        return
+
+    # Create page lookup
+    page_lookup = {p["page_number"]: p for p in pages}
+
+    for i, (start_page, section_num, div_code) in enumerate(boundaries):
+        # Find end page (next section start - 1, or last page)
+        if i + 1 < len(boundaries):
+            end_page = boundaries[i + 1][0] - 1
+        else:
+            end_page = max(p["page_number"] for p in pages)
+
+        # Assign all pages in range
+        for page_num in range(start_page, end_page + 1):
+            if page_num in page_lookup:
+                page = page_lookup[page_num]
+                # Only assign if not already classified
+                if page["division_code"] is None:
+                    page["section_number"] = section_num
+                    page["division_code"] = div_code
+                    page["classification_method"] = "ai"
+
+    ai_count = sum(1 for p in pages if p.get("classification_method") == "ai")
+    print(f"[PARSE] AI boundaries assigned {ai_count} pages")
 
 
 # Legacy keyword fallback (disabled - replaced by AI)
@@ -1257,52 +1291,27 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             page["division_code"] = prev_division
             page["classification_method"] = "inherit"
 
-    # TIER 3: AI Header Classification
-    # If we still have many unclassified pages, use Gemini to classify them
-    # This replaces the old keyword fallback which had too many false positives
+    # TIER 3: AI Section Boundary Detection
+    # If we still have many unclassified pages, use AI to find section headers
+    # then assign pages based on boundaries (not per-page classification)
     unclassified_pages = [p for p in pages if p["division_code"] is None]
 
     if unclassified_pages:
-        # Check if we have enough classified pages already (threshold: 50%)
         classified_count = len(pages) - len(unclassified_pages)
         classified_ratio = classified_count / len(pages) if pages else 0
 
         # Only use AI if less than 50% of pages are classified
-        # (otherwise inheritance should have worked well)
         if classified_ratio < 0.5:
             print(
                 f"[PARSE] Only {classified_ratio:.0%} classified - triggering AI fallback"
             )
-            ai_divisions = ai_classify_pages(unclassified_pages)
 
-            # Apply AI classifications (skip None values - let inheritance handle)
-            for page, division_code in zip(unclassified_pages, ai_divisions):
-                if division_code is not None:
-                    page["division_code"] = division_code
-                    page["section_number"] = f"{division_code} 00 00"  # Generic section
-                    page["classification_method"] = "ai"
+            # Find section boundaries using AI
+            boundaries = ai_find_section_boundaries(pages)
 
-            ai_classified = sum(
-                1 for p in pages if p.get("classification_method") == "ai"
-            )
-            print(f"[PARSE] AI classified {ai_classified} pages")
-
-            # Run inheritance again after AI classification to propagate sections
-            prev_section = None
-            prev_division = None
-            for page in pages:
-                if page["classification_method"] == "ai":
-                    # AI-classified page - remember for next
-                    prev_section = page.get("section_number")
-                    prev_division = page["division_code"]
-                elif page["division_code"] is None and prev_division is not None:
-                    # Still unclassified - inherit from AI
-                    page["section_number"] = prev_section
-                    page["division_code"] = prev_division
-                    page["classification_method"] = "inherit"
-                elif page["division_code"] is not None:
-                    prev_section = page.get("section_number")
-                    prev_division = page["division_code"]
+            if boundaries:
+                # Apply boundaries to assign pages
+                apply_section_boundaries(pages, boundaries)
         else:
             print(
                 f"[PARSE] {classified_ratio:.0%} already classified - skipping AI fallback"
