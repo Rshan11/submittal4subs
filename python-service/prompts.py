@@ -6,6 +6,15 @@ summaries that help subcontractors price jobs quickly.
 """
 
 # ═══════════════════════════════════════════════════════════════
+# UNIFIED OUTPUT PREFIX - Prepended to all prompts
+# ═══════════════════════════════════════════════════════════════
+
+UNIFIED_OUTPUT_PREFIX = """## CRITICAL: UNIFIED OUTPUT
+Analyze ALL provided specification sections as a SINGLE INTEGRATED SCOPE. Produce ONE unified summary - do not create separate summaries for each section or division. When the same item appears in multiple sections, list it ONCE in the most relevant category. Merge and deduplicate related requirements.
+
+"""
+
+# ═══════════════════════════════════════════════════════════════
 # GENERIC SUMMARIZE PROMPT (Default for all trades)
 # ═══════════════════════════════════════════════════════════════
 
@@ -2282,43 +2291,47 @@ def get_summarize_prompt(trade: str, division: str = None) -> str:
         division: Division code (e.g., "26", "04")
 
     Returns:
-        The appropriate prompt string for that trade
+        The appropriate prompt string for that trade, with unified output prefix
     """
     trade_lower = trade.lower() if trade else ""
 
     # Electrical trades (26, 27, 28)
     if trade_lower == "electrical" or division in ("26", "27", "28"):
-        return ELECTRICAL_SUMMARIZE_PROMPT
+        selected_prompt = ELECTRICAL_SUMMARIZE_PROMPT
 
     # Mechanical/HVAC (23)
-    if trade_lower in ("mechanical", "hvac") or division == "23":
-        return MECHANICAL_SUMMARIZE_PROMPT
+    elif trade_lower in ("mechanical", "hvac") or division == "23":
+        selected_prompt = MECHANICAL_SUMMARIZE_PROMPT
 
     # Plumbing (22)
-    if trade_lower == "plumbing" or division == "22":
-        return PLUMBING_SUMMARIZE_PROMPT
+    elif trade_lower == "plumbing" or division == "22":
+        selected_prompt = PLUMBING_SUMMARIZE_PROMPT
 
     # Thermal & Moisture Protection (07)
-    if (
+    elif (
         trade_lower in ("thermal", "roofing", "waterproofing", "insulation")
         or division == "07"
     ):
-        return THERMAL_MOISTURE_SUMMARIZE_PROMPT
+        selected_prompt = THERMAL_MOISTURE_SUMMARIZE_PROMPT
 
     # Concrete (03)
-    if trade_lower == "concrete" or division == "03":
-        return CONCRETE_SUMMARIZE_PROMPT
+    elif trade_lower == "concrete" or division == "03":
+        selected_prompt = CONCRETE_SUMMARIZE_PROMPT
 
     # Structural Steel / Metals (05)
-    if trade_lower in ("steel", "metals", "structural") or division == "05":
-        return METALS_SUMMARIZE_PROMPT
+    elif trade_lower in ("steel", "metals", "structural") or division == "05":
+        selected_prompt = METALS_SUMMARIZE_PROMPT
 
     # Masonry (04)
-    if trade_lower == "masonry" or division == "04":
-        return MASONRY_SUMMARIZE_PROMPT
+    elif trade_lower == "masonry" or division == "04":
+        selected_prompt = MASONRY_SUMMARIZE_PROMPT
 
     # Default to generic prompt
-    return GENERIC_SUMMARIZE_PROMPT
+    else:
+        selected_prompt = GENERIC_SUMMARIZE_PROMPT
+
+    # Prepend the unified output instruction to all prompts
+    return UNIFIED_OUTPUT_PREFIX + selected_prompt
 
 
 # Division to prompt mapping for future expansion
