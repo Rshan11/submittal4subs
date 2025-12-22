@@ -960,16 +960,23 @@ async def _ai_classify_pages_async(pages: List[dict]) -> List[str]:
             print(f"[PARSE] AI batch {batch_start + 1}-{batch_end} of {total_pages}...")
 
             # Build prompt with page headers
-            prompt = """You are classifying construction specification pages by CSI MasterFormat division.
+            prompt = """You are classifying construction specification pages by CSI division.
 
-For each page header below, return the 2-digit division code (00-48).
-- Look for "SECTION XX YY ZZ" patterns - first 2 digits are the division
-- Look for "DIVISION XX" patterns
-- Look for section footers like "XX XX XX - 1" where XX is the division
-- Common divisions: 03=Concrete, 04=Masonry, 05=Steel, 06=Wood, 07=Thermal/Roofing, 08=Doors/Windows, 09=Finishes, 22=Plumbing, 23=HVAC, 26=Electrical
-- If unclear or blank page, return "01" as default
+CRITICAL: Look ONLY at the "SECTION XX YY ZZ" line in the header.
+- The first 2 digits after "SECTION" are the division code.
+- IGNORE any other division numbers mentioned in body text.
+- IGNORE cross-references like "See Section 23 05 00"
 
-Return ONLY a JSON array of 2-digit strings in order. Example: ["01", "01", "23", "23", "07"]
+Examples:
+- "SECTION 01 30 00.24" → Division "01"
+- "SECTION 23 05 15" → Division "23"
+- "SECTION 07 21 13" → Division "07"
+- Page mentions "coordinate with Division 23" but header says "SECTION 01 30 00" → Division "01"
+
+If no SECTION header found, return "XX" (unknown).
+
+For each page below, return ONLY the 2-digit division from its SECTION header.
+Return JSON array: ["01", "01", "23", ...]
 
 PAGE HEADERS:
 """
@@ -1058,9 +1065,11 @@ def _parse_ai_response(response_text: str, expected_length: int) -> List[str]:
         # Validate each division code
         validated = []
         for code in results:
-            code_str = str(code).zfill(2)[:2]
+            code_str = str(code).upper().zfill(2)[:2]
             if code_str in VALID_DIVISIONS:
                 validated.append(code_str)
+            elif code_str == "XX":
+                validated.append(None)  # Unknown - let inheritance handle it
             else:
                 validated.append("01")  # Default for invalid codes
 
@@ -1266,11 +1275,12 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
             )
             ai_divisions = ai_classify_pages(unclassified_pages)
 
-            # Apply AI classifications
+            # Apply AI classifications (skip None values - let inheritance handle)
             for page, division_code in zip(unclassified_pages, ai_divisions):
-                page["division_code"] = division_code
-                page["section_number"] = f"{division_code} 00 00"  # Generic section
-                page["classification_method"] = "ai"
+                if division_code is not None:
+                    page["division_code"] = division_code
+                    page["section_number"] = f"{division_code} 00 00"  # Generic section
+                    page["classification_method"] = "ai"
 
             ai_classified = sum(
                 1 for p in pages if p.get("classification_method") == "ai"
