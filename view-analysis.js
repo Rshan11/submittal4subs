@@ -142,14 +142,38 @@ function displayResults(results) {
   let html = "";
 
   console.log("[VIEW] Display results:", results);
-  console.log(
-    "[VIEW] Format:",
-    results?.format,
-    "Has summary:",
-    !!results?.summary,
-  );
 
-  // Check if this is the new condensed markdown format
+  // New API format: { trade_analysis, contract_analysis, executive_summary }
+  if (
+    results &&
+    (results.executive_summary ||
+      results.trade_analysis ||
+      results.contract_analysis)
+  ) {
+    let combinedMarkdown = "";
+
+    if (results.executive_summary) {
+      combinedMarkdown += results.executive_summary + "\n\n---\n\n";
+    }
+
+    if (results.trade_analysis?.summary) {
+      combinedMarkdown += results.trade_analysis.summary + "\n\n---\n\n";
+    }
+
+    if (results.contract_analysis?.summary) {
+      combinedMarkdown += results.contract_analysis.summary;
+    }
+
+    if (combinedMarkdown) {
+      html += '<div class="condensed-summary">';
+      html += convertMarkdownToHTML(combinedMarkdown);
+      html += "</div>";
+      document.getElementById("resultsContent").innerHTML = html;
+      return;
+    }
+  }
+
+  // Check if this is the condensed markdown format (format + summary)
   if (results && results.format === "markdown" && results.summary) {
     html += '<div class="condensed-summary">';
     html += convertMarkdownToHTML(results.summary);
@@ -158,7 +182,7 @@ function displayResults(results) {
     return;
   }
 
-  // Also check if results itself is the summary (different structure)
+  // Also check if results has a summary string directly
   if (
     results &&
     typeof results.summary === "string" &&
