@@ -44,10 +44,13 @@ async function loadDashboard() {
                     id,
                     job_id,
                     status,
+                    page_count,
                     spec_analyses (
                         id,
                         division_code,
-                        analysis_type
+                        analysis_type,
+                        status,
+                        created_at
                     )
                 `,
         )
@@ -56,18 +59,38 @@ async function loadDashboard() {
       specsWithAnalyses = specs || [];
     }
 
-    // Attach analyses to jobs
+    // Attach specs and analyses to jobs with enriched data
     const jobsWithAnalyses = (jobs || []).map((job) => {
       const jobSpecs = specsWithAnalyses.filter((s) => s.job_id === job.id);
       const allAnalyses = jobSpecs.flatMap((s) => s.spec_analyses || []);
+      const totalPages = jobSpecs.reduce(
+        (sum, s) => sum + (s.page_count || 0),
+        0,
+      );
+
+      // Find most recent analysis
+      const sortedAnalyses = [...allAnalyses].sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at),
+      );
+      const lastAnalysis = sortedAnalyses[0] || null;
+
+      // Get unique divisions analyzed
+      const analyzedDivisions = [
+        ...new Set(allAnalyses.map((a) => a.division_code)),
+      ];
+
       return {
         ...job,
+        specs: jobSpecs,
         spec_analyses: allAnalyses,
+        totalPages,
+        lastAnalysis,
+        analyzedDivisions,
       };
     });
 
     currentJobs = jobsWithAnalyses;
-    renderJobsTable(currentJobs);
+    renderJobsGrid(currentJobs);
 
     // Load user subscription info
     const { data: subscription } = await supabase
@@ -95,84 +118,174 @@ async function loadDashboard() {
 }
 
 // ============================================
-// RENDER JOBS TABLE
+// RENDER JOBS GRID
 // ============================================
 
-function renderJobsTable(jobs) {
-  const tbody = document.getElementById("jobsTableBody");
+function renderJobsGrid(jobs) {
+  const grid = document.getElementById("jobsGrid");
 
   if (!jobs || jobs.length === 0) {
-    tbody.innerHTML = `
-            <tr>
-                <td colspan="5" style="text-align: center; padding: 60px 20px; color: #999;">
-                    <div style="font-size: 48px; margin-bottom: 16px;">📋</div>
-                    <div style="font-size: 18px; font-weight: 500; margin-bottom: 8px;">No jobs yet</div>
-                    <div style="font-size: 14px;">Click "+ New Job" to get started</div>
-                </td>
-            </tr>
-        `;
+    grid.innerHTML = `
+      <div class="col-span-full empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-title">No jobs yet</div>
+        <div class="empty-state-text">Click "+ New Job" to get started with your first specification analysis</div>
+      </div>
+    `;
     return;
   }
 
-  tbody.innerHTML = jobs
+  grid.innerHTML = jobs
     .map((job) => {
       const analyses = job.spec_analyses || [];
       const analysisCount = analyses.length;
+      const hasSpecs = job.specs && job.specs.length > 0;
 
-      // Determine job status based on analyses
-      let jobStatus = "done";
-      let statusText = "Done";
-      let statusIcon = "●";
+      // Determine job status based on actual state
+      let statusClass, statusText, statusIcon;
 
       const hasProcessing = analyses.some((a) => a.status === "processing");
+      const hasCompleted = analyses.some((a) => a.status === "completed");
       const hasFailed = analyses.some((a) => a.status === "failed");
 
       if (hasProcessing) {
-        jobStatus = "processing";
+        statusClass = "status-processing";
         statusText = "Processing";
         statusIcon = "●";
-      } else if (hasFailed) {
-        jobStatus = "failed";
+      } else if (hasFailed && !hasCompleted) {
+        statusClass = "status-failed";
         statusText = "Failed";
         statusIcon = "⚠";
+      } else if (hasCompleted) {
+        statusClass = "status-done";
+        statusText = `${analysisCount} ${analysisCount === 1 ? "Analysis" : "Analyses"}`;
+        statusIcon = "✓";
+      } else {
+        statusClass = "status-ready";
+        statusText = "Ready";
+        statusIcon = "○";
       }
 
+      // Format dates
       const createdDate = new Date(job.created_at);
-      const formattedDate = createdDate.toLocaleDateString("en-US", {
+      const formattedCreated = createdDate.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
+        year: "numeric",
       });
 
+      // Last analysis date
+      let lastAnalysisText = "";
+      if (job.lastAnalysis) {
+        const lastDate = new Date(job.lastAnalysis.created_at);
+        lastAnalysisText = lastDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+      }
+
+      // Divisions preview (show first 3)
+      const divisionsPreview = job.analyzedDivisions
+        .slice(0, 3)
+        .map((d) => `Div ${d}`)
+        .join(", ");
+      const moreCount =
+        job.analyzedDivisions.length > 3
+          ? ` +${job.analyzedDivisions.length - 3}`
+          : "";
+
       return `
-            <tr class="job-row" data-job-id="${job.id}">
-                <td class="job-name">${escapeHtml(job.job_name)}</td>
-                <td>${formattedDate}</td>
-                <td>
-                    <span class="status-badge status-${jobStatus}">
-                        <span class="status-icon">${statusIcon}</span> ${statusText}
-                    </span>
-                </td>
-                <td class="analyses-count">
-                    ${analysisCount > 0 ? `<button class="btn-history" data-job-id="${job.id}" title="View past analyses">${analysisCount}</button>` : "0"}
-                </td>
-                <td>
-                    <button class="btn-delete" data-job-id="${job.id}" data-job-name="${escapeHtml(job.job_name)}" title="Delete job">🗑</button>
-                    <button class="btn-chevron">›</button>
-                </td>
-            </tr>
-        `;
+      <div class="job-card card-interactive p-6" data-job-id="${job.id}">
+        <div class="flex justify-between items-start mb-4">
+          <h3 class="text-lg font-semibold text-brand-text leading-tight pr-4">${escapeHtml(job.job_name)}</h3>
+          <button class="btn-delete text-brand-text-muted hover:text-status-danger transition-colors p-1"
+                  data-job-id="${job.id}"
+                  data-job-name="${escapeHtml(job.job_name)}"
+                  title="Delete job">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="space-y-3 mb-5">
+          <div class="flex items-center gap-2 text-sm text-brand-text-muted">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span>Created ${formattedCreated}</span>
+          </div>
+
+          ${
+            job.totalPages > 0
+              ? `
+          <div class="flex items-center gap-2 text-sm text-brand-text-muted">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>${job.totalPages} spec pages uploaded</span>
+          </div>
+          `
+              : ""
+          }
+
+          ${
+            lastAnalysisText
+              ? `
+          <div class="flex items-center gap-2 text-sm text-brand-text-muted">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Last analyzed ${lastAnalysisText}</span>
+          </div>
+          `
+              : ""
+          }
+
+          ${
+            divisionsPreview
+              ? `
+          <div class="flex items-center gap-2 text-sm text-brand-text-muted">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <span>${divisionsPreview}${moreCount}</span>
+          </div>
+          `
+              : ""
+          }
+        </div>
+
+        <div class="flex items-center justify-between pt-4 border-t border-brand-border">
+          <span class="status-badge ${statusClass}">
+            <span class="status-icon">${statusIcon}</span> ${statusText}
+          </span>
+          ${
+            analysisCount > 0
+              ? `
+          <button class="btn-history text-sm text-brand-primary hover:text-brand-primary-soft font-medium"
+                  data-job-id="${job.id}">
+            View History →
+          </button>
+          `
+              : `
+          <span class="text-sm text-brand-text-muted">Click to start</span>
+          `
+          }
+        </div>
+      </div>
+    `;
     })
     .join("");
 
-  // Add click handlers to job rows - Go directly to upload page
-  document.querySelectorAll(".job-row").forEach((row) => {
-    row.addEventListener("click", function (e) {
+  // Add click handlers to job cards - Go directly to upload page
+  document.querySelectorAll(".job-card").forEach((card) => {
+    card.addEventListener("click", function (e) {
       // Don't navigate if clicking the history button or delete button
-      if (e.target.classList.contains("btn-history")) return;
-      if (e.target.classList.contains("btn-delete")) return;
+      if (e.target.closest(".btn-history")) return;
+      if (e.target.closest(".btn-delete")) return;
 
       const jobId = this.getAttribute("data-job-id");
-      // Go directly to upload page for new analysis
       window.location.href = `/upload.html?job_id=${jobId}&analysis_type=general`;
     });
   });

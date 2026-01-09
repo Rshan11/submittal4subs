@@ -370,6 +370,10 @@
         @apply bg-status-danger/10 text-status-danger;
     }
 
+    .status-ready {
+        @apply bg-gray-100 text-brand-text-muted;
+    }
+
     /* ==========================================
      UPLOAD BOX
      ========================================== */
