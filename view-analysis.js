@@ -141,8 +141,29 @@ async function loadJobNameAndUpdateFooter(jobId) {
 function displayResults(results) {
   let html = "";
 
+  console.log("[VIEW] Display results:", results);
+  console.log(
+    "[VIEW] Format:",
+    results?.format,
+    "Has summary:",
+    !!results?.summary,
+  );
+
   // Check if this is the new condensed markdown format
-  if (results.format === "markdown" && results.summary) {
+  if (results && results.format === "markdown" && results.summary) {
+    html += '<div class="condensed-summary">';
+    html += convertMarkdownToHTML(results.summary);
+    html += "</div>";
+    document.getElementById("resultsContent").innerHTML = html;
+    return;
+  }
+
+  // Also check if results itself is the summary (different structure)
+  if (
+    results &&
+    typeof results.summary === "string" &&
+    results.summary.length > 0
+  ) {
     html += '<div class="condensed-summary">';
     html += convertMarkdownToHTML(results.summary);
     html += "</div>";
