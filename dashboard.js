@@ -201,8 +201,6 @@ function renderJobsTable(jobs) {
 // EVENT LISTENERS (exposed via window)
 // ============================================
 
-let selectedAnalysisType = null;
-let selectedJobId = null;
 let deleteJobId = null;
 let deleteJobName = null;
 
@@ -244,48 +242,20 @@ async function handleDeleteJob() {
   }
 }
 
-window.openAnalyzeModal = function (jobId) {
-  selectedJobId = jobId;
-  const analyzeModal = document.getElementById("analyzeModal");
-  analyzeModal.style.display = "flex";
-  resetAnalysisSelection();
-};
-
-function resetAnalysisSelection() {
-  const analysisOptions = document.querySelectorAll(".analysis-option");
-  analysisOptions.forEach((opt) => opt.classList.remove("selected"));
-  const customPromptContainer = document.getElementById(
-    "customPromptContainer",
-  );
-  const customPromptInput = document.getElementById("customPromptInput");
-  customPromptContainer.style.display = "none";
-  customPromptInput.value = "";
-  selectedAnalysisType = null;
-}
-
 function setupEventListeners() {
   // Modal elements
-  const analyzeModal = document.getElementById("analyzeModal");
   const newJobModal = document.getElementById("newJobModal");
   const deleteJobModal = document.getElementById("deleteJobModal");
-  const closeModalBtn = document.getElementById("closeModalBtn");
   const closeNewJobBtn = document.getElementById("closeNewJobBtn");
   const closeDeleteJobBtn = document.getElementById("closeDeleteJobBtn");
-  const cancelBtn = document.getElementById("cancelBtn");
   const cancelNewJobBtn = document.getElementById("cancelNewJobBtn");
   const cancelDeleteJobBtn = document.getElementById("cancelDeleteJobBtn");
   const confirmDeleteJobBtn = document.getElementById("confirmDeleteJobBtn");
   const newJobBtn = document.getElementById("newJobBtn");
-  const analyzeBtn = document.getElementById("analyzeBtn");
   const createJobBtn = document.getElementById("createJobBtn");
   const logoutBtn = document.getElementById("logoutBtn");
 
   // Form elements
-  const analysisOptions = document.querySelectorAll(".analysis-option");
-  const customPromptContainer = document.getElementById(
-    "customPromptContainer",
-  );
-  const customPromptInput = document.getElementById("customPromptInput");
   const jobNameInput = document.getElementById("jobNameInput");
 
   // New Job Modal
@@ -314,35 +284,6 @@ function setupEventListeners() {
 
   deleteJobModal.addEventListener("click", (e) => {
     if (e.target === deleteJobModal) closeDeleteModal();
-  });
-
-  // Analyze Modal
-  function closeAnalyzeModal() {
-    analyzeModal.style.display = "none";
-    resetAnalysisSelection();
-  }
-
-  closeModalBtn.addEventListener("click", closeAnalyzeModal);
-  cancelBtn.addEventListener("click", closeAnalyzeModal);
-
-  analyzeModal.addEventListener("click", (e) => {
-    if (e.target === analyzeModal) closeAnalyzeModal();
-  });
-
-  // Analysis type selection
-  analysisOptions.forEach((option) => {
-    option.addEventListener("click", function () {
-      analysisOptions.forEach((opt) => opt.classList.remove("selected"));
-      this.classList.add("selected");
-      selectedAnalysisType = this.getAttribute("data-type");
-
-      if (selectedAnalysisType === "custom") {
-        customPromptContainer.style.display = "block";
-        customPromptInput.focus();
-      } else {
-        customPromptContainer.style.display = "none";
-      }
-    });
   });
 
   // Create Job
@@ -376,33 +317,6 @@ function setupEventListeners() {
     }
   });
 
-  // Start Analysis
-  analyzeBtn.addEventListener("click", async () => {
-    if (!selectedAnalysisType) {
-      showNotification("Please select an analysis type", "error");
-      return;
-    }
-
-    if (selectedAnalysisType === "custom" && !customPromptInput.value.trim()) {
-      showNotification("Please enter a custom prompt", "error");
-      return;
-    }
-
-    closeAnalyzeModal();
-
-    // Redirect to upload page with job context
-    const params = new URLSearchParams({
-      job_id: selectedJobId,
-      analysis_type: selectedAnalysisType,
-    });
-
-    if (selectedAnalysisType === "custom") {
-      params.append("custom_prompt", customPromptInput.value.trim());
-    }
-
-    window.location.href = `/upload.html?${params.toString()}`;
-  });
-
   // Logout button
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
@@ -415,7 +329,6 @@ function setupEventListeners() {
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (analyzeModal.style.display === "flex") closeAnalyzeModal();
       if (newJobModal.style.display === "flex") closeNewJobModal();
       if (deleteJobModal.style.display === "flex") closeDeleteModal();
     }
