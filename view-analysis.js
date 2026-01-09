@@ -45,6 +45,23 @@ document.getElementById("newAnalysisBtn")?.addEventListener("click", () => {
   }
 });
 
+// Analyze Another Division - goes to division selector for same job
+document.getElementById("analyzeAnotherBtn")?.addEventListener("click", () => {
+  if (currentAnalysis?.job_id) {
+    window.location.href = `/upload.html?job_id=${currentAnalysis.job_id}`;
+  }
+});
+
+// Back to Job - goes to dashboard with job selected
+document.getElementById("backToJobLink")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (currentAnalysis?.job_id) {
+    window.location.href = `/dashboard.html?job=${currentAnalysis.job_id}`;
+  } else {
+    window.location.href = "/dashboard.html";
+  }
+});
+
 document
   .getElementById("downloadMarkdownBtn")
   ?.addEventListener("click", downloadMarkdown);
@@ -64,9 +81,38 @@ async function loadAnalysis() {
 
     currentAnalysis = data;
     displayResults(data.result);
+
+    // Load job name and update footer
+    if (data.job_id) {
+      await loadJobNameAndUpdateFooter(data.job_id);
+    }
   } catch (error) {
     console.error("Error loading analysis:", error);
     alert("Failed to load analysis");
+  }
+}
+
+async function loadJobNameAndUpdateFooter(jobId) {
+  try {
+    const { data: job, error } = await supabase
+      .from("jobs")
+      .select("job_name")
+      .eq("id", jobId)
+      .single();
+
+    if (!error && job) {
+      const savedJobName = document.getElementById("savedJobName");
+      const backToJobLink = document.getElementById("backToJobLink");
+
+      if (savedJobName) {
+        savedJobName.textContent = job.job_name;
+      }
+      if (backToJobLink) {
+        backToJobLink.href = `/dashboard.html?job=${jobId}`;
+      }
+    }
+  } catch (err) {
+    console.error("Error loading job name:", err);
   }
 }
 

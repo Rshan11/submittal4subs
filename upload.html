@@ -113,7 +113,10 @@
                         <!-- Previous Analyses -->
                         <div id="previousAnalyses" style="display: none">
                             <h4>Previous Analyses</h4>
-                            <ul id="analysesList"></ul>
+                            <div
+                                id="analysesList"
+                                class="previous-analyses-grid"
+                            ></div>
                         </div>
 
                         <div class="file-actions mt-4">
@@ -181,6 +184,40 @@
                     </div>
                     <div class="card-body">
                         <div class="results-content" id="resultsContent"></div>
+                    </div>
+                    <div class="card-footer results-footer">
+                        <div class="save-confirmation" id="saveConfirmation">
+                            <svg
+                                class="w-4 h-4 text-status-success"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M5 13l4 4L19 7"
+                                />
+                            </svg>
+                            <span
+                                >Saved to
+                                <strong id="savedJobName"
+                                    >this job</strong
+                                ></span
+                            >
+                        </div>
+                        <div class="results-footer-actions">
+                            <a href="#" id="backToJobLink" class="btn btn-ghost"
+                                >Back to Job</a
+                            >
+                            <button
+                                id="analyzeAnotherBtn"
+                                class="btn btn-primary"
+                            >
+                                Analyze Another Division
+                            </button>
+                        </div>
                     </div>
                 </section>
 

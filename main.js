@@ -204,6 +204,7 @@ let analysisStartTime = null;
 let currentSpecId = null;
 let storedJobId = null;
 let parseResult = null;
+let currentJobName = null;
 
 // DOM Elements
 const uploadSection = document.getElementById("uploadSection");
@@ -232,6 +233,10 @@ const downloadPdfBtn = document.getElementById("downloadPdfBtn");
 const newAnalysisBtn = document.getElementById("newAnalysisBtn");
 const addAnalysisBtn = document.getElementById("addAnalysisBtn");
 const tryAgainBtn = document.getElementById("tryAgainBtn");
+const analyzeAnotherBtn = document.getElementById("analyzeAnotherBtn");
+const backToJobLink = document.getElementById("backToJobLink");
+const savedJobName = document.getElementById("savedJobName");
+const saveConfirmation = document.getElementById("saveConfirmation");
 
 // Initialize
 init();
@@ -260,6 +265,9 @@ function init() {
   if (addAnalysisBtn)
     addAnalysisBtn.addEventListener("click", showNewAnalysisForm);
   if (tryAgainBtn) tryAgainBtn.addEventListener("click", startNewAnalysis);
+  if (analyzeAnotherBtn)
+    analyzeAnotherBtn.addEventListener("click", goToAnotherDivision);
+  if (backToJobLink) backToJobLink.addEventListener("click", goBackToJob);
 
   // Division selection - load section preview
   if (divisionSelect) {
@@ -466,9 +474,22 @@ async function loadPreviousAnalyses(jobId) {
           month: "short",
           day: "numeric",
         });
-        return `<li>Division ${a.division_code} - ${getDivisionName(a.division_code)} (${date})</li>`;
+        return `
+          <div class="previous-analysis-tile" data-analysis-id="${a.id}">
+            <div class="tile-division">Division ${a.division_code}</div>
+            <div class="tile-name">${getDivisionName(a.division_code)}</div>
+            <div class="tile-date">${date}</div>
+          </div>`;
       })
       .join("");
+
+    // Add click handlers to tiles
+    analysesList.querySelectorAll(".previous-analysis-tile").forEach((tile) => {
+      tile.addEventListener("click", () => {
+        const analysisId = tile.dataset.analysisId;
+        window.location.href = `/view-analysis.html?id=${analysisId}`;
+      });
+    });
 
     analysesDiv.style.display = "block";
   } catch (err) {
@@ -611,7 +632,11 @@ async function scanDocument() {
         throw new Error(`Failed to create job: ${jobError.message}`);
       }
       storedJobId = newJob.id;
+      currentJobName = newJob.job_name;
       console.log("[API] Created new job:", storedJobId);
+    } else {
+      // Load job name for existing job
+      await loadJobName(storedJobId);
     }
 
     // STEP 1: Upload PDF to Python service
@@ -819,6 +844,42 @@ async function analyzeSelectedDivision() {
 // SAVE ANALYSIS TO DATABASE
 // ============================================================================
 
+// Load job name for displaying in the save confirmation
+async function loadJobName(jobId) {
+  if (!jobId) return;
+
+  try {
+    const { data: job, error } = await supabase
+      .from("jobs")
+      .select("job_name")
+      .eq("id", jobId)
+      .single();
+
+    if (!error && job) {
+      currentJobName = job.job_name;
+      console.log("[JOB] Loaded job name:", currentJobName);
+    }
+  } catch (err) {
+    console.error("[JOB] Error loading job name:", err);
+  }
+}
+
+// Update the footer to show save confirmation with job name
+function updateSaveConfirmation() {
+  if (saveConfirmation && currentJobName) {
+    saveConfirmation.style.display = "flex";
+    if (savedJobName) {
+      savedJobName.textContent = currentJobName;
+    }
+  }
+
+  // Update back to job link href
+  const targetJobId = storedJobId || jobId;
+  if (backToJobLink && targetJobId) {
+    backToJobLink.href = `/dashboard.html?job=${targetJobId}`;
+  }
+}
+
 async function saveAnalysisToDatabase(analysisResult, contractTerms = null) {
   if (!currentSpecId || !jobId || !analysisResult.division) {
     console.warn("[SAVE] Missing required fields, skipping save");
@@ -871,6 +932,9 @@ async function saveAnalysisToDatabase(analysisResult, contractTerms = null) {
 
     // Refresh the tabs to show the new analysis
     await loadSavedAnalyses();
+
+    // Update the footer with save confirmation
+    updateSaveConfirmation();
   } catch (error) {
     console.error("[SAVE] Error saving analysis:", error);
     // Don't throw - analysis is still displayed, just not saved
@@ -1498,6 +1562,34 @@ function startNewAnalysis() {
   // Hide division section, show upload
   if (divisionSection) divisionSection.style.display = "none";
   showSection("upload");
+}
+
+// Go back to division selector for same job (Analyze Another Division)
+function goToAnotherDivision() {
+  analysisResult = null;
+  selectedDivision = null;
+
+  // Reset division dropdown selection but keep the options
+  if (divisionSelect) {
+    divisionSelect.value = "";
+  }
+
+  // Hide section preview
+  hideSectionPreview();
+
+  // Show division section
+  showSection("division");
+}
+
+// Go back to job detail page
+function goBackToJob(e) {
+  e.preventDefault();
+  const targetJobId = storedJobId || jobId;
+  if (targetJobId) {
+    window.location.href = `/dashboard.html?job=${targetJobId}`;
+  } else {
+    window.location.href = "/dashboard.html";
+  }
 }
 
 function showSection(section) {
