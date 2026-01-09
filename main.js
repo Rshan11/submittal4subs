@@ -839,6 +839,7 @@ async function saveAnalysisToDatabase(analysisResult, contractTerms = null) {
     const analysisData = {
       spec_id: currentSpecId,
       job_id: jobId,
+      user_id: currentUser?.id,
       division_code: divisionCode,
       analysis_type: "trade",
       result: analysisResult,
@@ -891,6 +892,7 @@ async function saveContractTerms(contractTerms) {
     const contractData = {
       spec_id: currentSpecId,
       job_id: jobId,
+      user_id: currentUser?.id,
       division_code: "00",
       analysis_type: "contract",
       result: {
