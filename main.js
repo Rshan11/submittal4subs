@@ -899,7 +899,6 @@ async function saveAnalysisToDatabase(analysisResult, contractTerms = null) {
       analysis_type: "trade",
       result: analysisResult,
       processing_time_ms: analysisResult.metadata?.processingTimeMs || 0,
-      status: "completed",
     };
 
     if (existing) {
@@ -962,7 +961,6 @@ async function saveContractTerms(contractTerms) {
           divisionName: "Contract Terms",
         },
       },
-      status: "completed",
     };
 
     if (existing) {
@@ -989,9 +987,8 @@ async function loadSavedAnalyses() {
   try {
     const { data: analyses, error } = await supabase
       .from("spec_analyses")
-      .select("id, division_code, analysis_type, result, status, created_at")
+      .select("id, division_code, analysis_type, result, created_at")
       .eq("job_id", jobId)
-      .eq("status", "completed")
       .order("division_code", { ascending: true });
 
     if (error) throw error;
