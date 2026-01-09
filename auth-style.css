@@ -43,7 +43,7 @@ body {
 .auth-tabs {
     display: flex;
     gap: 4px;
-    margin-bottom: var(--space-lg);
+    margin: var(--space-lg) var(--space-lg) var(--space-lg) var(--space-lg);
     padding: 4px;
     background: var(--bg);
     border-radius: var(--radius-btn);
@@ -94,6 +94,7 @@ body {
 }
 
 .auth-form {
+    padding: 0 var(--space-lg) var(--space-lg) var(--space-lg);
     animation: fadeIn 0.3s ease-out;
 }
 
