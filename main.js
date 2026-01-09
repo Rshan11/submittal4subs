@@ -1,7 +1,7 @@
 // Main application logic for Spec Analyzer - Python API Version
 import { generateAndDownloadPDF } from "./pdf-generator.js";
 import { supabase } from "./lib/supabase.js";
-import { uploadSpec, parseSpec, analyzeSpec } from "./lib/api.js";
+import { uploadSpec, parseSpec, analyzeSpec, API_BASE_URL } from "./lib/api.js";
 
 // Division names lookup
 const DIVISION_NAMES = {
@@ -347,7 +347,7 @@ async function loadRelatedSections(divisionCode) {
 
   try {
     const response = await fetch(
-      `${PYTHON_API}/spec/${currentSpecId}/division/${divisionCode}/related`,
+      `${API_BASE_URL}/spec/${currentSpecId}/division/${divisionCode}/related`,
     );
 
     if (!response.ok) {

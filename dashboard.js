@@ -36,27 +36,25 @@ async function loadDashboard() {
     const jobIds = (jobs || []).map((j) => j.id);
 
     let specsWithAnalyses = [];
+    let allAnalyses = [];
     if (jobIds.length > 0) {
+      // Fetch specs
       const { data: specs } = await supabase
         .from("specs")
-        .select(
-          `
-                    id,
-                    job_id,
-                    status,
-                    page_count,
-                    spec_analyses (
-                        id,
-                        division_code,
-                        analysis_type,
-                        status,
-                        created_at
-                    )
-                `,
-        )
+        .select("id, job_id, status, page_count")
         .in("job_id", jobIds);
 
-      specsWithAnalyses = specs || [];
+      // Fetch analyses separately (avoid join issues)
+      const { data: analyses } = await supabase
+        .from("spec_analyses")
+        .select("id, spec_id, division_code, analysis_type, status, created_at")
+        .in("job_id", jobIds);
+
+      // Attach analyses to specs
+      specsWithAnalyses = (specs || []).map((spec) => ({
+        ...spec,
+        spec_analyses: (analyses || []).filter((a) => a.spec_id === spec.id),
+      }));
     }
 
     // Attach specs and analyses to jobs with enriched data
