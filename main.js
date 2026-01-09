@@ -74,6 +74,8 @@ let currentUser = null;
   // Check if job already has a spec - if so, load it instead of showing upload
   if (jobId && user) {
     await checkForExistingSpec(jobId);
+    // Load any saved analyses for this job
+    await loadSavedAnalyses();
   }
 })();
 
@@ -228,6 +230,7 @@ const errorMessage = document.getElementById("errorMessage");
 const downloadBtn = document.getElementById("downloadBtn");
 const downloadPdfBtn = document.getElementById("downloadPdfBtn");
 const newAnalysisBtn = document.getElementById("newAnalysisBtn");
+const addAnalysisBtn = document.getElementById("addAnalysisBtn");
 const tryAgainBtn = document.getElementById("tryAgainBtn");
 
 // Initialize
@@ -254,6 +257,8 @@ function init() {
     downloadPdfBtn.addEventListener("click", () => downloadPDF());
   if (newAnalysisBtn)
     newAnalysisBtn.addEventListener("click", startNewAnalysis);
+  if (addAnalysisBtn)
+    addAnalysisBtn.addEventListener("click", showNewAnalysisForm);
   if (tryAgainBtn) tryAgainBtn.addEventListener("click", startNewAnalysis);
 
   // Division selection - load section preview
@@ -276,6 +281,7 @@ function init() {
 
 // Track selected related sections for analysis
 let selectedRelatedSections = [];
+let savedAnalyses = []; // Track saved analyses for tabs
 
 // Load section preview for selected division (free feature)
 async function loadSectionPreview(divisionCode) {
@@ -800,10 +806,222 @@ async function analyzeSelectedDivision() {
 
     updateLoadingStatus("Complete!", 100);
     displayResults(analysisResult);
+
+    // Save analysis to database
+    await saveAnalysisToDatabase(analysisResult, contractSummary);
   } catch (error) {
     console.error("[API] Analysis error:", error);
     showError(error.message || "Failed to analyze division. Please try again.");
   }
+}
+
+// ============================================================================
+// SAVE ANALYSIS TO DATABASE
+// ============================================================================
+
+async function saveAnalysisToDatabase(analysisResult, contractTerms = null) {
+  if (!currentSpecId || !jobId || !analysisResult.division) {
+    console.warn("[SAVE] Missing required fields, skipping save");
+    return;
+  }
+
+  try {
+    const divisionCode = analysisResult.division;
+
+    // Check if analysis already exists for this spec+division
+    const { data: existing } = await supabase
+      .from("spec_analyses")
+      .select("id")
+      .eq("spec_id", currentSpecId)
+      .eq("division_code", divisionCode)
+      .maybeSingle();
+
+    const analysisData = {
+      spec_id: currentSpecId,
+      job_id: jobId,
+      division_code: divisionCode,
+      analysis_type: "trade",
+      result: analysisResult,
+      processing_time_ms: analysisResult.metadata?.processingTimeMs || 0,
+      status: "completed",
+    };
+
+    if (existing) {
+      // Update existing
+      const { error } = await supabase
+        .from("spec_analyses")
+        .update(analysisData)
+        .eq("id", existing.id);
+      if (error) throw error;
+      console.log(`[SAVE] Updated analysis for Division ${divisionCode}`);
+    } else {
+      // Insert new
+      const { error } = await supabase
+        .from("spec_analyses")
+        .insert(analysisData);
+      if (error) throw error;
+      console.log(`[SAVE] Saved new analysis for Division ${divisionCode}`);
+    }
+
+    // Save contract terms separately if provided (as Division 00)
+    if (contractTerms) {
+      await saveContractTerms(contractTerms);
+    }
+
+    // Refresh the tabs to show the new analysis
+    await loadSavedAnalyses();
+  } catch (error) {
+    console.error("[SAVE] Error saving analysis:", error);
+    // Don't throw - analysis is still displayed, just not saved
+  }
+}
+
+async function saveContractTerms(contractTerms) {
+  if (!currentSpecId || !jobId || !contractTerms) return;
+
+  try {
+    // Check if contract terms already saved
+    const { data: existing } = await supabase
+      .from("spec_analyses")
+      .select("id")
+      .eq("spec_id", currentSpecId)
+      .eq("division_code", "00")
+      .maybeSingle();
+
+    const contractData = {
+      spec_id: currentSpecId,
+      job_id: jobId,
+      division_code: "00",
+      analysis_type: "contract",
+      result: {
+        format: "markdown",
+        summary: contractTerms,
+        division: "00",
+        metadata: {
+          division: "00",
+          divisionName: "Contract Terms",
+        },
+      },
+      status: "completed",
+    };
+
+    if (existing) {
+      await supabase
+        .from("spec_analyses")
+        .update(contractData)
+        .eq("id", existing.id);
+    } else {
+      await supabase.from("spec_analyses").insert(contractData);
+    }
+    console.log("[SAVE] Saved contract terms");
+  } catch (error) {
+    console.error("[SAVE] Error saving contract terms:", error);
+  }
+}
+
+// ============================================================================
+// ANALYSIS TABS - Load, Render, Switch
+// ============================================================================
+
+async function loadSavedAnalyses() {
+  if (!jobId) return;
+
+  try {
+    const { data: analyses, error } = await supabase
+      .from("spec_analyses")
+      .select("id, division_code, analysis_type, result, status, created_at")
+      .eq("job_id", jobId)
+      .eq("status", "completed")
+      .order("division_code", { ascending: true });
+
+    if (error) throw error;
+
+    savedAnalyses = analyses || [];
+    console.log(`[TABS] Loaded ${savedAnalyses.length} saved analyses`);
+
+    renderAnalysisTabs();
+  } catch (error) {
+    console.error("[TABS] Error loading saved analyses:", error);
+  }
+}
+
+function renderAnalysisTabs() {
+  const tabsContainer = document.getElementById("analysisTabs");
+  const tabsList = document.getElementById("tabsList");
+
+  if (!tabsContainer || !tabsList) return;
+
+  if (savedAnalyses.length === 0) {
+    tabsContainer.style.display = "none";
+    return;
+  }
+
+  // Build tabs HTML
+  const tabsHtml = savedAnalyses
+    .map((analysis) => {
+      const divCode = analysis.division_code;
+      const isContract = divCode === "00";
+      const label = isContract
+        ? "Contract Terms"
+        : `Div ${divCode} - ${getDivisionName(divCode)}`;
+      const isActive = analysis.division_code === analysisResult?.division;
+
+      return `
+      <button class="analysis-tab ${isActive ? "active" : ""}"
+              data-division="${divCode}"
+              data-analysis-id="${analysis.id}">
+        ${label}
+      </button>
+    `;
+    })
+    .join("");
+
+  tabsList.innerHTML = tabsHtml;
+  tabsContainer.style.display = "flex";
+
+  // Add click handlers
+  tabsList.querySelectorAll(".analysis-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const divisionCode = tab.dataset.division;
+      switchToTab(divisionCode);
+    });
+  });
+}
+
+function switchToTab(divisionCode) {
+  const analysis = savedAnalyses.find((a) => a.division_code === divisionCode);
+  if (!analysis || !analysis.result) {
+    console.warn(`[TABS] No analysis found for division ${divisionCode}`);
+    return;
+  }
+
+  // Update active tab styling
+  document.querySelectorAll(".analysis-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.division === divisionCode);
+  });
+
+  // Display the saved result
+  analysisResult = analysis.result;
+  displayResults(analysisResult);
+
+  // Hide division selector, show results
+  showSection("results");
+
+  console.log(`[TABS] Switched to Division ${divisionCode}`);
+}
+
+function showNewAnalysisForm() {
+  // Hide results, show division selector
+  const resultsSection = document.getElementById("resultsSection");
+  const divisionSection = document.getElementById("divisionSection");
+
+  if (resultsSection) resultsSection.style.display = "none";
+  if (divisionSection) divisionSection.style.display = "block";
+
+  // Clear active tab styling
+  document.querySelectorAll(".analysis-tab").forEach((tab) => {
+    tab.classList.remove("active");
+  });
 }
 
 // Helper function to format tiled analysis business terms

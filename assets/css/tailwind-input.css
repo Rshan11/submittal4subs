@@ -375,6 +375,52 @@
     }
 
     /* ==========================================
+     ANALYSIS TABS
+     ========================================== */
+
+    .analysis-tabs {
+        @apply flex items-center justify-between
+           px-4 py-2
+           bg-brand-surface
+           border border-brand-border
+           rounded-t-xl
+           gap-4
+           mb-0;
+        border-bottom: none;
+    }
+
+    .tabs-container {
+        @apply flex gap-1
+           overflow-x-auto
+           scrollbar-hide;
+    }
+
+    .analysis-tab {
+        @apply px-4 py-2
+           rounded-t-lg
+           border border-transparent
+           bg-transparent
+           text-brand-text-muted
+           text-sm font-medium
+           cursor-pointer
+           whitespace-nowrap
+           transition-all duration-150;
+    }
+
+    .analysis-tab:hover {
+        @apply bg-brand-bg text-brand-text;
+    }
+
+    .analysis-tab.active {
+        @apply bg-brand-surface
+           border-brand-border
+           text-brand-primary
+           font-semibold;
+        border-bottom-color: transparent;
+        margin-bottom: -1px;
+    }
+
+    /* ==========================================
      UPLOAD BOX
      ========================================== */
 
