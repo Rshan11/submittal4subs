@@ -47,7 +47,7 @@ async function loadDashboard() {
       // Fetch analyses separately (avoid join issues)
       const { data: analyses } = await supabase
         .from("spec_analyses")
-        .select("id, spec_id, division_code, analysis_type, status, created_at")
+        .select("id, spec_id, division_code, analysis_type, created_at")
         .in("job_id", jobIds);
 
       // Attach analyses to specs

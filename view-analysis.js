@@ -18,7 +18,8 @@ let currentUser = null;
   }
   currentUser = user;
 
-  document.getElementById("navUserEmail").textContent = user.email;
+  const navUserEmail = document.getElementById("navUserEmail");
+  if (navUserEmail) navUserEmail.textContent = user.email;
 
   await loadAnalysis();
 })();
