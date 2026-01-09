@@ -473,23 +473,17 @@ async function loadPreviousAnalyses(jobId) {
         const date = new Date(a.created_at).toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
         });
         return `
-          <div class="previous-analysis-tile" data-analysis-id="${a.id}">
+          <a href="/view-analysis.html?id=${a.id}" class="previous-analysis-tile">
             <div class="tile-division">Division ${a.division_code}</div>
             <div class="tile-name">${getDivisionName(a.division_code)}</div>
             <div class="tile-date">${date}</div>
-          </div>`;
+          </a>`;
       })
       .join("");
-
-    // Add click handlers to tiles
-    analysesList.querySelectorAll(".previous-analysis-tile").forEach((tile) => {
-      tile.addEventListener("click", () => {
-        const analysisId = tile.dataset.analysisId;
-        window.location.href = `/view-analysis.html?id=${analysisId}`;
-      });
-    });
 
     analysesDiv.style.display = "block";
   } catch (err) {

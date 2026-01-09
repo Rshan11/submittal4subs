@@ -655,9 +655,9 @@
     }
 
     .previous-analysis-tile {
-        @apply p-3 rounded-lg border border-brand-border bg-brand-surface
-               cursor-pointer transition-all duration-150
-               hover:border-brand-primary hover:shadow-sm hover:-translate-y-0.5;
+        @apply block p-3 rounded-lg border border-brand-border bg-brand-surface
+               cursor-pointer transition-all duration-150 no-underline
+               hover:border-brand-primary hover:shadow-md hover:-translate-y-0.5 hover:bg-brand-primary/5;
     }
 
     .previous-analysis-tile .tile-division {
