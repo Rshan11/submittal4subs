@@ -70,6 +70,15 @@ document
   ?.addEventListener("click", downloadPDF);
 
 async function loadAnalysis() {
+  if (!analysisId) {
+    console.error("No analysis ID in URL");
+    document.getElementById("resultsContent").innerHTML =
+      '<p class="error-message">No analysis ID provided. Please go back and try again.</p>';
+    return;
+  }
+
+  console.log("[VIEW] Loading analysis:", analysisId);
+
   try {
     const { data, error } = await supabase
       .from("spec_analyses")
@@ -77,8 +86,19 @@ async function loadAnalysis() {
       .eq("id", analysisId)
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("[VIEW] Supabase error:", error);
+      throw error;
+    }
 
+    if (!data) {
+      console.error("[VIEW] No data returned");
+      document.getElementById("resultsContent").innerHTML =
+        '<p class="error-message">Analysis not found.</p>';
+      return;
+    }
+
+    console.log("[VIEW] Analysis loaded:", data.id, data.division_code);
     currentAnalysis = data;
     displayResults(data.result);
 
@@ -88,7 +108,8 @@ async function loadAnalysis() {
     }
   } catch (error) {
     console.error("Error loading analysis:", error);
-    alert("Failed to load analysis");
+    document.getElementById("resultsContent").innerHTML =
+      `<p class="error-message">Failed to load analysis: ${error.message}</p>`;
   }
 }
 
