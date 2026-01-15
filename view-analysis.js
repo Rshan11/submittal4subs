@@ -528,8 +528,11 @@ async function handleCreateSubmittals() {
     // Check if package already exists
     let pkg = await loadPackageForJob(jobId);
     console.log("[SUBMITTAL] Existing package:", pkg);
+    console.log("[SUBMITTAL] Job ID:", jobId);
+    console.log("[SUBMITTAL] currentAnalysis.result:", currentAnalysis.result);
 
     if (!pkg) {
+      console.log("[SUBMITTAL] No existing package, calling AI extraction...");
       // Extract submittals from analysis using AI
       const parsedItems = await extractSubmittalsFromAnalysis(
         currentAnalysis.result,
