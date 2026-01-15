@@ -305,18 +305,26 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
 
   // Pattern 1: "QUOTE THESE ITEMS" section - most reliable
   const quoteSection = text.match(/QUOTE THESE ITEMS[\s\S]*?(?=\n---|\n##|$)/i);
+  console.log("[SUBMITTAL] Quote section found:", !!quoteSection);
   if (quoteSection) {
+    console.log(
+      "[SUBMITTAL] Quote section:",
+      quoteSection[0].substring(0, 400),
+    );
     const lines = quoteSection[0].split("\n");
     lines.forEach((line) => {
-      // Match: "* CMU - Kanta Products" or "- CMU - Kanta Products"
+      // Match: "- CMU - Mutual Materials - Product Name" with optional leading whitespace
       const match = line.match(
-        /^[-*]\s*([^-]+)\s*-\s*([^-]+?)(?:\s*-\s*(.+))?$/,
+        /^\s*[-*]\s+([^-]+)\s+-\s+([^-]+?)(?:\s+-\s+(.+))?$/,
       );
       if (match) {
+        const desc = match[1].trim();
+        const mfr = match[2].trim();
+        console.log("[SUBMITTAL] Found quote item:", desc, "-", mfr);
         submittals.push({
           spec_section: "",
-          description: match[1].trim(),
-          manufacturer: match[2].trim(),
+          description: desc,
+          manufacturer: mfr,
         });
       }
     });
@@ -338,7 +346,7 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
     }
   }
 
-  // Pattern 3: Pricing Impact Items
+  // Pattern 3: Pricing Impact Items - match lines with "- Item:" format
   const pricingSection = text.match(
     /Pricing Impact Items[\s\S]*?(?=\n###|\nRisk Alerts|\n---|\n##[^#]|$)/i,
   );
@@ -350,11 +358,13 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
     );
     const lines = pricingSection[0].split("\n");
     lines.forEach((line) => {
-      // Match: "- Item Name:" or "* Item Name:"
-      const match = line.match(/^[-*]\s*([^:]+):/);
+      // Match: "- Item Name:" or "* Item Name:" with optional leading whitespace
+      const match = line.match(/^\s*[-*]\s+([^:]+):/);
       if (match) {
         const item = match[1].trim();
         console.log("[SUBMITTAL] Found pricing item:", item);
+        // Skip generic items
+        if (item.toLowerCase().includes("pricing") || item.length < 3) return;
         // Skip if similar item already exists
         if (
           !submittals.some((s) =>
