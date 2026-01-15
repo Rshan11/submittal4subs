@@ -124,7 +124,16 @@ async function loadAnalysis() {
     // Show submittal button if feature enabled
     if (isSubmittalFeatureEnabled(currentUser?.id)) {
       const btn = document.getElementById("createSubmittalsBtn");
-      if (btn) btn.style.display = "inline-flex";
+      if (btn) {
+        btn.style.display = "inline-flex";
+        // Check if package already exists for this job
+        if (data.job_id) {
+          const existingPkg = await loadPackageForJob(data.job_id);
+          if (existingPkg) {
+            btn.innerHTML = "📋 View Submittals";
+          }
+        }
+      }
     }
 
     // Load job name and update footer
@@ -539,6 +548,14 @@ async function handleCreateSubmittals() {
     }
 
     currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
+
+    // Update button to show "View Submittals" since package now exists
+    const btn = document.getElementById("createSubmittalsBtn");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "📋 View Submittals";
+    }
+
     showSubmittalGenerator();
   } catch (error) {
     console.error("[SUBMITTAL] Error:", error);
