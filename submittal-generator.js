@@ -295,8 +295,10 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
   if (quoteSection) {
     const lines = quoteSection[0].split("\n");
     lines.forEach((line) => {
-      // Match: "* CMU (Insulated & Architectural) - Kanta Products - HI-R and Architectural Block"
-      const match = line.match(/^\*\s*([^-]+)\s*-\s*([^-]+?)(?:\s*-\s*(.+))?$/);
+      // Match: "* CMU - Kanta Products" or "- CMU - Kanta Products"
+      const match = line.match(
+        /^[-*]\s*([^-]+)\s*-\s*([^-]+?)(?:\s*-\s*(.+))?$/,
+      );
       if (match) {
         submittals.push({
           spec_section: "",
@@ -330,8 +332,8 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
   if (pricingSection) {
     const lines = pricingSection[0].split("\n");
     lines.forEach((line) => {
-      // Match: "* Stainless Steel Flashing: description here"
-      const match = line.match(/^\*\s*([^:]+):/);
+      // Match: "- Item Name:" or "* Item Name:"
+      const match = line.match(/^[-*]\s*([^:]+):/);
       if (match) {
         const item = match[1].trim();
         // Skip if similar item already exists
