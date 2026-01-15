@@ -1,11 +1,26 @@
 import { supabase } from "./lib/supabase.js";
 import { generateAndDownloadPDF } from "./pdf-generator.js";
+import {
+  isSubmittalFeatureEnabled,
+  createSubmittalPackage,
+  loadSubmittalPackage,
+  loadPackageForJob,
+  addSubmittalItem,
+  updateSubmittalItem,
+  deleteSubmittalItem,
+  uploadSubmittalFile,
+  deleteSubmittalFile,
+  parseSubmittalsFromAnalysis,
+  renderSubmittalGenerator,
+  combineSubmittalPackage,
+} from "./submittal-generator.js";
 
 const urlParams = new URLSearchParams(window.location.search);
 const analysisId = urlParams.get("id");
 
 let currentAnalysis = null;
 let currentUser = null;
+let currentSubmittalPackage = null;
 
 // Initialize
 (async () => {
@@ -69,6 +84,9 @@ document
 document
   .getElementById("downloadPdfBtn")
   ?.addEventListener("click", downloadPDF);
+document
+  .getElementById("createSubmittalsBtn")
+  ?.addEventListener("click", handleCreateSubmittals);
 
 async function loadAnalysis() {
   if (!analysisId) {
@@ -102,6 +120,12 @@ async function loadAnalysis() {
     console.log("[VIEW] Analysis loaded:", data.id, data.division_code);
     currentAnalysis = data;
     displayResults(data.result);
+
+    // Show submittal button if feature enabled
+    if (isSubmittalFeatureEnabled(currentUser?.id)) {
+      const btn = document.getElementById("createSubmittalsBtn");
+      if (btn) btn.style.display = "inline-flex";
+    }
 
     // Load job name and update footer
     if (data.job_id) {
@@ -466,4 +490,192 @@ async function downloadPDF() {
     console.error("[PDF] Export error:", error);
     alert("Failed to generate PDF: " + error.message);
   }
+}
+
+// ============================================================================
+// SUBMITTAL GENERATOR
+// ============================================================================
+
+async function handleCreateSubmittals() {
+  if (!currentAnalysis || !currentUser?.id) {
+    alert("No analysis available");
+    return;
+  }
+
+  const jobId = currentAnalysis.job_id;
+  if (!jobId) {
+    alert("No job ID found");
+    return;
+  }
+
+  try {
+    const btn = document.getElementById("createSubmittalsBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Creating...";
+    }
+
+    // Check if package already exists
+    let pkg = await loadPackageForJob(jobId);
+
+    if (!pkg) {
+      // Parse submittals from analysis
+      const parsedItems = parseSubmittalsFromAnalysis(currentAnalysis.result);
+      console.log("[SUBMITTAL] Parsed items:", parsedItems);
+
+      // Get job name
+      const { data: job } = await supabase
+        .from("jobs")
+        .select("job_name")
+        .eq("id", jobId)
+        .single();
+
+      pkg = await createSubmittalPackage(
+        currentUser.id,
+        jobId,
+        job?.job_name || "Project",
+        parsedItems,
+      );
+    }
+
+    currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
+    showSubmittalGenerator();
+  } catch (error) {
+    console.error("[SUBMITTAL] Error:", error);
+    alert("Failed to create submittal package: " + error.message);
+
+    const btn = document.getElementById("createSubmittalsBtn");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "📋 Create Submittals";
+    }
+  }
+}
+
+async function showSubmittalGenerator() {
+  // Hide main content, show submittal generator
+  const mainContainer = document.querySelector(".max-w-6xl");
+
+  // Create submittal section if it doesn't exist
+  let submittalSection = document.getElementById("submittalSection");
+  if (!submittalSection) {
+    submittalSection = document.createElement("div");
+    submittalSection.id = "submittalSection";
+    submittalSection.className = "card";
+    submittalSection.style.marginTop = "1rem";
+    mainContainer.appendChild(submittalSection);
+  }
+
+  // Hide results card
+  const resultsCard = document.querySelector(".card");
+  if (resultsCard) resultsCard.style.display = "none";
+
+  // Hide action buttons
+  const actionButtons = document.querySelector(".action-buttons");
+  if (actionButtons) actionButtons.style.display = "none";
+
+  submittalSection.style.display = "block";
+
+  // Load user profile
+  const { data: userProfile } = await supabase
+    .from("user_profiles")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .single();
+
+  renderSubmittalGenerator(submittalSection, currentSubmittalPackage, {
+    onBack: () => {
+      submittalSection.style.display = "none";
+      const resultsCard = document.querySelector(".card");
+      if (resultsCard) resultsCard.style.display = "block";
+      const actionButtons = document.querySelector(".action-buttons");
+      if (actionButtons) actionButtons.style.display = "flex";
+    },
+
+    onAddItem: async () => {
+      try {
+        await addSubmittalItem(currentSubmittalPackage.id, {
+          description: "New Submittal Item",
+        });
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to add item: " + error.message);
+      }
+    },
+
+    onUpdateItem: async (itemId, updates) => {
+      try {
+        await updateSubmittalItem(itemId, updates);
+      } catch (error) {
+        console.error("Failed to update item:", error);
+      }
+    },
+
+    onDeleteItem: async (itemId) => {
+      try {
+        await deleteSubmittalItem(itemId);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to delete item: " + error.message);
+      }
+    },
+
+    onUploadFile: async (itemId, file) => {
+      try {
+        await uploadSubmittalFile(itemId, file);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to upload file: " + error.message);
+      }
+    },
+
+    onDeleteFile: async (fileId, r2Key) => {
+      try {
+        await deleteSubmittalFile(fileId, r2Key);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to delete file: " + error.message);
+      }
+    },
+
+    onCombine: async () => {
+      try {
+        const overlay = document.createElement("div");
+        overlay.className = "submittal-loading-overlay";
+        overlay.innerHTML = `
+          <div class="submittal-loading-content">
+            <div class="loading-spinner"></div>
+            <h3>Generating Package</h3>
+            <p>Combining cover sheet, TOC, and attachments...</p>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+
+        await combineSubmittalPackage(currentSubmittalPackage, userProfile);
+
+        overlay.remove();
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+
+        alert("Submittal package generated and downloaded!");
+      } catch (error) {
+        document.querySelector(".submittal-loading-overlay")?.remove();
+        alert("Failed to generate package: " + error.message);
+      }
+    },
+  });
 }

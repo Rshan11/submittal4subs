@@ -17,6 +17,7 @@
         />
         <link rel="stylesheet" href="assets/css/tailwind-input.css" />
         <link rel="stylesheet" href="style.css" />
+        <link rel="stylesheet" href="shared-styles.css" />
     </head>
     <body class="bg-brand-bg min-h-screen">
         <!-- Header injected by shared-header.js -->
@@ -24,6 +25,13 @@
         <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
             <!-- Action Buttons -->
             <div class="action-buttons mb-6">
+                <button
+                    id="createSubmittalsBtn"
+                    class="create-submittals-btn"
+                    style="display: none"
+                >
+                    📋 Create Submittals
+                </button>
                 <button id="downloadMarkdownBtn" class="btn btn-secondary">
                     Download Markdown
                 </button>
