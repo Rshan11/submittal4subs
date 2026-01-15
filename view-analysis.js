@@ -517,8 +517,9 @@ async function handleCreateSubmittals() {
     return;
   }
 
+  const btn = document.getElementById("createSubmittalsBtn");
+
   try {
-    const btn = document.getElementById("createSubmittalsBtn");
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = "⏳ Creating...";
@@ -555,7 +556,6 @@ async function handleCreateSubmittals() {
     currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
 
     // Update button to show "View Submittals" since package now exists
-    const btn = document.getElementById("createSubmittalsBtn");
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = "📋 View Submittals";
@@ -566,7 +566,6 @@ async function handleCreateSubmittals() {
     console.error("[SUBMITTAL] Error:", error);
     alert("Failed to create submittal package: " + error.message);
 
-    const btn = document.getElementById("createSubmittalsBtn");
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = "📋 Create Submittals";
@@ -612,6 +611,12 @@ async function showSubmittalGenerator() {
       if (resultsCard) resultsCard.style.display = "block";
       const actionButtons = document.querySelector(".action-buttons");
       if (actionButtons) actionButtons.style.display = "flex";
+      // Reset button state
+      const btn = document.getElementById("createSubmittalsBtn");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = "📋 View Submittals";
+      }
     },
 
     onAddItem: async () => {
