@@ -271,6 +271,9 @@ export function getSubmittalFileUrl(r2Key) {
 // ============================================
 
 export function parseSubmittalsFromAnalysis(analysisResult) {
+  console.log("[SUBMITTAL] Raw analysisResult:", analysisResult);
+  console.log("[SUBMITTAL] Keys:", Object.keys(analysisResult || {}));
+
   const submittals = [];
 
   if (!analysisResult) {
@@ -279,6 +282,8 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
 
   // Handle both formats: result.summary OR result.executive_summary
   const text = analysisResult.summary || analysisResult.executive_summary || "";
+  console.log("[SUBMITTAL] Text length:", text.length);
+  console.log("[SUBMITTAL] Text preview:", text.substring(0, 200));
 
   if (!text) {
     console.log("[SUBMITTAL] No summary text found in analysis result");
