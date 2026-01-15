@@ -273,11 +273,17 @@ export function getSubmittalFileUrl(r2Key) {
 export function parseSubmittalsFromAnalysis(analysisResult) {
   const submittals = [];
 
-  if (!analysisResult?.summary) {
+  if (!analysisResult) {
     return submittals;
   }
 
-  const text = analysisResult.summary;
+  // Handle both formats: result.summary OR result.executive_summary
+  const text = analysisResult.summary || analysisResult.executive_summary || "";
+
+  if (!text) {
+    console.log("[SUBMITTAL] No summary text found in analysis result");
+    return submittals;
+  }
 
   // Pattern 1: "QUOTE THESE ITEMS" section - most reliable
   const quoteSection = text.match(/QUOTE THESE ITEMS[\s\S]*?(?=\n---|\n##|$)/i);
