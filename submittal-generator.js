@@ -273,78 +273,106 @@ export function getSubmittalFileUrl(r2Key) {
 export function parseSubmittalsFromAnalysis(analysisResult) {
   const submittals = [];
 
-  if (!analysisResult || !analysisResult.summary) {
+  if (!analysisResult?.summary) {
     return submittals;
   }
 
   const text = analysisResult.summary;
 
-  // Look for common patterns in spec analysis output
-  // Pattern 1: "Section XX XX XX - Description"
-  const sectionPattern =
-    /Section\s+(\d{2}\s*\d{2}\s*\d{2})\s*[-–]\s*([^\n]+)/gi;
-  let match;
-
-  while ((match = sectionPattern.exec(text)) !== null) {
-    submittals.push({
-      spec_section: match[1].replace(/\s+/g, " ").trim(),
-      description: match[2].trim(),
-      manufacturer: "",
-    });
-  }
-
-  // Pattern 2: Look for manufacturer mentions with products
-  const productPattern =
-    /(?:^|\n)\s*[-•]\s*\*?\*?([^:*\n]+)\*?\*?:\s*([^\n]+)/gm;
-  while ((match = productPattern.exec(text)) !== null) {
-    const name = match[1].trim();
-    const details = match[2].trim();
-
-    // Skip if it looks like a section header we already captured
-    if (name.match(/Section\s+\d/i)) continue;
-
-    // Try to extract manufacturer from details
-    const mfrMatch = details.match(
-      /(?:by\s+|from\s+|mfr:\s*)([A-Z][a-zA-Z\s&]+?)(?:\s*[-,;]|$)/i,
-    );
-
-    submittals.push({
-      spec_section: "",
-      description: name,
-      manufacturer: mfrMatch ? mfrMatch[1].trim() : "",
-    });
-  }
-
-  // Pattern 3: Look for "Quote These Items" or similar sections
-  const quotePattern =
-    /Quote\s+These\s+Items[:\s]*\n([\s\S]*?)(?=\n#|\n---|\n\*\*|$)/i;
-  const quoteMatch = text.match(quotePattern);
-  if (quoteMatch) {
-    const items = quoteMatch[1]
-      .split("\n")
-      .filter(
-        (line) => line.trim().startsWith("-") || line.trim().startsWith("•"),
-      );
-    items.forEach((item) => {
-      const cleanItem = item.replace(/^[-•]\s*/, "").trim();
-      if (cleanItem && !submittals.some((s) => s.description === cleanItem)) {
+  // Pattern 1: "QUOTE THESE ITEMS" section - most reliable
+  const quoteSection = text.match(/QUOTE THESE ITEMS[\s\S]*?(?=\n---|\n##|$)/i);
+  if (quoteSection) {
+    const lines = quoteSection[0].split("\n");
+    lines.forEach((line) => {
+      // Match: "* CMU (Insulated & Architectural) - Kanta Products - HI-R and Architectural Block"
+      const match = line.match(/^\*\s*([^-]+)\s*-\s*([^-]+?)(?:\s*-\s*(.+))?$/);
+      if (match) {
         submittals.push({
           spec_section: "",
-          description: cleanItem,
-          manufacturer: "",
+          description: match[1].trim(),
+          manufacturer: match[2].trim(),
         });
       }
     });
   }
 
-  // Deduplicate by description
-  const seen = new Set();
-  return submittals.filter((s) => {
-    const key = s.description.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // Pattern 2: CMU table rows
+  const tablePattern = /\|\s*(CMU-\d+)\s*\|[^|]+\|[^|]+\|\s*([^|]+)\s*\|/g;
+  let tableMatch;
+  while ((tableMatch = tablePattern.exec(text)) !== null) {
+    const cmuType = tableMatch[1];
+    const face = tableMatch[2].trim();
+    // Don't duplicate if we already have CMU from quote section
+    if (!submittals.some((s) => s.description.toLowerCase().includes("cmu"))) {
+      submittals.push({
+        spec_section: "04 20 00",
+        description: `${cmuType} - ${face}`,
+        manufacturer: "",
+      });
+    }
+  }
+
+  // Pattern 3: Pricing Impact Items
+  const pricingSection = text.match(
+    /Pricing Impact Items[\s\S]*?(?=\nRisk Alerts|\n---|\n##|$)/i,
+  );
+  if (pricingSection) {
+    const lines = pricingSection[0].split("\n");
+    lines.forEach((line) => {
+      // Match: "* Stainless Steel Flashing: description here"
+      const match = line.match(/^\*\s*([^:]+):/);
+      if (match) {
+        const item = match[1].trim();
+        // Skip if similar item already exists
+        if (
+          !submittals.some((s) =>
+            s.description
+              .toLowerCase()
+              .includes(item.toLowerCase().split(" ")[0]),
+          )
+        ) {
+          submittals.push({
+            spec_section: "",
+            description: item,
+            manufacturer: "",
+          });
+        }
+      }
+    });
+  }
+
+  // Pattern 4: Flashing section
+  const flashingMatch = text.match(/Through-wall:\s*([^,\n]+)/i);
+  if (
+    flashingMatch &&
+    !submittals.some((s) => s.description.toLowerCase().includes("flashing"))
+  ) {
+    submittals.push({
+      spec_section: "",
+      description: "Through-Wall Flashing",
+      manufacturer: flashingMatch[1].trim(),
+    });
+  }
+
+  // Pattern 5: Reinforcing
+  if (text.includes("Galvanized") && text.includes("Rebar")) {
+    if (
+      !submittals.some(
+        (s) =>
+          s.description.toLowerCase().includes("rebar") ||
+          s.description.toLowerCase().includes("reinforc"),
+      )
+    ) {
+      submittals.push({
+        spec_section: "03 20 00",
+        description: "Reinforcing Steel - Galvanized",
+        manufacturer: "",
+      });
+    }
+  }
+
+  console.log("[SUBMITTAL] Parsed items:", submittals);
+  return submittals;
 }
 
 // ============================================
