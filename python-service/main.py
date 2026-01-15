@@ -871,6 +871,132 @@ async def delete_submittal(request: SubmittalDeleteRequest):
 
 
 # ═══════════════════════════════════════════════════════════════
+# SUBMITTAL AI EXTRACTION
+# ═══════════════════════════════════════════════════════════════
+
+
+class ExtractSubmittalsRequest(BaseModel):
+    text: str
+
+
+class SubmittalItem(BaseModel):
+    spec_section: str
+    description: str
+    manufacturer: str
+
+
+class ExtractSubmittalsResponse(BaseModel):
+    items: List[SubmittalItem]
+    error: Optional[str] = None
+
+
+@app.post("/extract-submittals", response_model=ExtractSubmittalsResponse)
+async def extract_submittals(request: ExtractSubmittalsRequest):
+    """
+    Extract submittal items from analysis text using Gemini AI.
+    Returns structured list of items requiring submittals.
+    """
+    import json
+
+    import httpx
+
+    print(f"[SUBMITTALS] Extract request, text length: {len(request.text)}")
+
+    if not request.text:
+        return ExtractSubmittalsResponse(items=[], error="No text provided")
+
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_api_key:
+        print("[SUBMITTALS] ERROR: GEMINI_API_KEY not configured")
+        return ExtractSubmittalsResponse(items=[], error="AI service not configured")
+
+    prompt = f"""Extract all items requiring submittals from this construction spec analysis.
+Return ONLY a valid JSON array, no other text or markdown formatting:
+
+[{{"spec_section": "04 20 00", "description": "Item name", "manufacturer": "Manufacturer or empty string"}}]
+
+Include:
+- Materials with specific manufacturers (especially items marked "Basis of Design" or "Or Equal")
+- Products listed under "Quote These Items" or "Manufacturers Summary"
+- Items from "Pricing Impact Items"
+- Equipment requiring product data
+- Any item mentioning submittals, shop drawings, or product data
+
+Important:
+- spec_section should be the CSI division code if known, or empty string
+- description should be a clear item name (e.g., "CMU - CarbonCure Environmental")
+- manufacturer should be the company name, or empty string if unknown
+
+Analysis text:
+{request.text}"""
+
+    try:
+        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{gemini_url}?key={gemini_api_key}",
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                        "maxOutputTokens": 2048,
+                    },
+                },
+            )
+
+            if response.status_code != 200:
+                print(f"[SUBMITTALS] Gemini API error: {response.status_code}")
+                print(f"[SUBMITTALS] Response: {response.text}")
+                return ExtractSubmittalsResponse(
+                    items=[], error=f"AI API error: {response.status_code}"
+                )
+
+            result = response.json()
+            result_text = (
+                result.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+                .strip()
+            )
+
+            print(f"[SUBMITTALS] Raw AI response: {result_text[:500]}")
+
+            # Clean up response - remove markdown code blocks if present
+            if result_text.startswith("```"):
+                result_text = result_text.split("\n", 1)[1]
+                result_text = result_text.rsplit("```", 1)[0]
+
+            # Also handle ```json prefix
+            if result_text.startswith("json"):
+                result_text = result_text[4:].strip()
+
+            items = json.loads(result_text)
+            print(f"[SUBMITTALS] Extracted {len(items)} items")
+
+            # Validate and convert to proper format
+            valid_items = []
+            for item in items:
+                valid_items.append(
+                    SubmittalItem(
+                        spec_section=str(item.get("spec_section", "")),
+                        description=str(item.get("description", "Unknown Item")),
+                        manufacturer=str(item.get("manufacturer", "")),
+                    )
+                )
+
+            return ExtractSubmittalsResponse(items=valid_items)
+
+    except json.JSONDecodeError as e:
+        print(f"[SUBMITTALS] JSON parse error: {e}")
+        return ExtractSubmittalsResponse(items=[], error="Failed to parse AI response")
+    except Exception as e:
+        print(f"[SUBMITTALS] Error: {e}")
+        return ExtractSubmittalsResponse(items=[], error=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
 # RUN SERVER
 # ═══════════════════════════════════════════════════════════════
 

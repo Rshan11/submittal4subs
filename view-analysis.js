@@ -10,7 +10,7 @@ import {
   deleteSubmittalItem,
   uploadSubmittalFile,
   deleteSubmittalFile,
-  parseSubmittalsFromAnalysis,
+  extractSubmittalsFromAnalysis,
   renderSubmittalGenerator,
   combineSubmittalPackage,
 } from "./submittal-generator.js";
@@ -529,9 +529,11 @@ async function handleCreateSubmittals() {
     console.log("[SUBMITTAL] Existing package:", pkg);
 
     if (!pkg) {
-      // Parse submittals from analysis
-      const parsedItems = parseSubmittalsFromAnalysis(currentAnalysis.result);
-      console.log("[SUBMITTAL] Parsed items:", parsedItems);
+      // Extract submittals from analysis using AI
+      const parsedItems = await extractSubmittalsFromAnalysis(
+        currentAnalysis.result,
+      );
+      console.log("[SUBMITTAL] AI extracted items:", parsedItems);
 
       // Get job name
       const { data: job } = await supabase

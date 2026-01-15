@@ -267,154 +267,72 @@ export function getSubmittalFileUrl(r2Key) {
 }
 
 // ============================================
-// PARSE SUBMITTALS FROM ANALYSIS
+// EXTRACT SUBMITTALS FROM ANALYSIS (AI-powered)
 // ============================================
 
-export function parseSubmittalsFromAnalysis(analysisResult) {
+export async function extractSubmittalsFromAnalysis(analysisResult) {
   console.log(
     "[SUBMITTAL] Raw analysisResult keys:",
     Object.keys(analysisResult || {}),
   );
 
-  const submittals = [];
-
   if (!analysisResult) {
-    return submittals;
+    console.log("[SUBMITTAL] No analysis result provided");
+    return [];
   }
 
-  // Handle multiple formats - check all possible locations for text
+  // Get all available text from analysis
   let text = "";
-  if (analysisResult.summary) {
+  if (analysisResult.executive_summary) {
+    text += analysisResult.executive_summary + "\n\n";
+    console.log("[SUBMITTAL] Including executive_summary");
+  }
+  if (analysisResult.trade_analysis?.summary) {
+    text += analysisResult.trade_analysis.summary + "\n\n";
+    console.log("[SUBMITTAL] Including trade_analysis.summary");
+  }
+  if (analysisResult.contract_analysis?.summary) {
+    text += analysisResult.contract_analysis.summary + "\n\n";
+    console.log("[SUBMITTAL] Including contract_analysis.summary");
+  }
+  // Fallback to summary field
+  if (!text && analysisResult.summary) {
     text = analysisResult.summary;
-    console.log("[SUBMITTAL] Using summary field");
-  } else if (analysisResult.executive_summary) {
-    text = analysisResult.executive_summary;
-    console.log("[SUBMITTAL] Using executive_summary field");
-  } else if (analysisResult.trade_analysis?.summary) {
-    text = analysisResult.trade_analysis.summary;
-    console.log("[SUBMITTAL] Using trade_analysis.summary field");
+    console.log("[SUBMITTAL] Using summary field as fallback");
   }
 
-  console.log("[SUBMITTAL] Text length:", text.length);
-  console.log("[SUBMITTAL] Text preview:", text.substring(0, 500));
-
-  if (!text) {
-    console.log("[SUBMITTAL] No summary text found in analysis result");
-    return submittals;
+  if (!text.trim()) {
+    console.log("[SUBMITTAL] No text found in analysis result");
+    return [];
   }
 
-  // Pattern 1: "QUOTE THESE ITEMS" section - most reliable
-  const quoteSection = text.match(/QUOTE THESE ITEMS[\s\S]*?(?=\n---|\n##|$)/i);
-  console.log("[SUBMITTAL] Quote section found:", !!quoteSection);
-  if (quoteSection) {
-    console.log(
-      "[SUBMITTAL] Quote section:",
-      quoteSection[0].substring(0, 400),
-    );
-    const lines = quoteSection[0].split("\n");
-    lines.forEach((line) => {
-      // Match: "- CMU - Mutual Materials - Product Name" with optional leading whitespace
-      const match = line.match(
-        /^\s*[-*]\s+([^-]+)\s+-\s+([^-]+?)(?:\s+-\s+(.+))?$/,
-      );
-      if (match) {
-        const desc = match[1].trim();
-        const mfr = match[2].trim();
-        console.log("[SUBMITTAL] Found quote item:", desc, "-", mfr);
-        submittals.push({
-          spec_section: "",
-          description: desc,
-          manufacturer: mfr,
-        });
-      }
+  console.log("[SUBMITTAL] Text length for AI extraction:", text.length);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/extract-submittals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
     });
-  }
 
-  // Pattern 2: CMU table rows
-  const tablePattern = /\|\s*(CMU-\d+)\s*\|[^|]+\|[^|]+\|\s*([^|]+)\s*\|/g;
-  let tableMatch;
-  while ((tableMatch = tablePattern.exec(text)) !== null) {
-    const cmuType = tableMatch[1];
-    const face = tableMatch[2].trim();
-    // Don't duplicate if we already have CMU from quote section
-    if (!submittals.some((s) => s.description.toLowerCase().includes("cmu"))) {
-      submittals.push({
-        spec_section: "04 20 00",
-        description: `${cmuType} - ${face}`,
-        manufacturer: "",
-      });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("[SUBMITTAL] AI extraction failed:", errorData);
+      return [];
     }
-  }
 
-  // Pattern 3: Pricing Impact Items - match lines with "- Item:" format
-  const pricingSection = text.match(
-    /Pricing Impact Items[\s\S]*?(?=\n###|\nRisk Alerts|\n---|\n##[^#]|$)/i,
-  );
-  console.log("[SUBMITTAL] Pricing section found:", !!pricingSection);
-  if (pricingSection) {
-    console.log(
-      "[SUBMITTAL] Pricing section:",
-      pricingSection[0].substring(0, 300),
-    );
-    const lines = pricingSection[0].split("\n");
-    lines.forEach((line) => {
-      // Match: "- Item Name:" or "* Item Name:" with optional leading whitespace
-      const match = line.match(/^\s*[-*]\s+([^:]+):/);
-      if (match) {
-        const item = match[1].trim();
-        console.log("[SUBMITTAL] Found pricing item:", item);
-        // Skip generic items
-        if (item.toLowerCase().includes("pricing") || item.length < 3) return;
-        // Skip if similar item already exists
-        if (
-          !submittals.some((s) =>
-            s.description
-              .toLowerCase()
-              .includes(item.toLowerCase().split(" ")[0]),
-          )
-        ) {
-          submittals.push({
-            spec_section: "",
-            description: item,
-            manufacturer: "",
-          });
-        }
-      }
-    });
-  }
+    const data = await response.json();
+    console.log("[SUBMITTAL] AI extracted items:", data.items);
 
-  // Pattern 4: Flashing section
-  const flashingMatch = text.match(/Through-wall:\s*([^,\n]+)/i);
-  if (
-    flashingMatch &&
-    !submittals.some((s) => s.description.toLowerCase().includes("flashing"))
-  ) {
-    submittals.push({
-      spec_section: "",
-      description: "Through-Wall Flashing",
-      manufacturer: flashingMatch[1].trim(),
-    });
-  }
-
-  // Pattern 5: Reinforcing
-  if (text.includes("Galvanized") && text.includes("Rebar")) {
-    if (
-      !submittals.some(
-        (s) =>
-          s.description.toLowerCase().includes("rebar") ||
-          s.description.toLowerCase().includes("reinforc"),
-      )
-    ) {
-      submittals.push({
-        spec_section: "03 20 00",
-        description: "Reinforcing Steel - Galvanized",
-        manufacturer: "",
-      });
+    if (data.error) {
+      console.warn("[SUBMITTAL] AI extraction warning:", data.error);
     }
-  }
 
-  console.log("[SUBMITTAL] Parsed items:", submittals);
-  return submittals;
+    return data.items || [];
+  } catch (error) {
+    console.error("[SUBMITTAL] AI extraction error:", error);
+    return [];
+  }
 }
 
 // ============================================
