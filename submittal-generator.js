@@ -271,8 +271,10 @@ export function getSubmittalFileUrl(r2Key) {
 // ============================================
 
 export function parseSubmittalsFromAnalysis(analysisResult) {
-  console.log("[SUBMITTAL] Raw analysisResult:", analysisResult);
-  console.log("[SUBMITTAL] Keys:", Object.keys(analysisResult || {}));
+  console.log(
+    "[SUBMITTAL] Raw analysisResult keys:",
+    Object.keys(analysisResult || {}),
+  );
 
   const submittals = [];
 
@@ -280,10 +282,21 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
     return submittals;
   }
 
-  // Handle both formats: result.summary OR result.executive_summary
-  const text = analysisResult.summary || analysisResult.executive_summary || "";
+  // Handle multiple formats - check all possible locations for text
+  let text = "";
+  if (analysisResult.summary) {
+    text = analysisResult.summary;
+    console.log("[SUBMITTAL] Using summary field");
+  } else if (analysisResult.executive_summary) {
+    text = analysisResult.executive_summary;
+    console.log("[SUBMITTAL] Using executive_summary field");
+  } else if (analysisResult.trade_analysis?.summary) {
+    text = analysisResult.trade_analysis.summary;
+    console.log("[SUBMITTAL] Using trade_analysis.summary field");
+  }
+
   console.log("[SUBMITTAL] Text length:", text.length);
-  console.log("[SUBMITTAL] Text preview:", text.substring(0, 200));
+  console.log("[SUBMITTAL] Text preview:", text.substring(0, 500));
 
   if (!text) {
     console.log("[SUBMITTAL] No summary text found in analysis result");
@@ -327,15 +340,21 @@ export function parseSubmittalsFromAnalysis(analysisResult) {
 
   // Pattern 3: Pricing Impact Items
   const pricingSection = text.match(
-    /Pricing Impact Items[\s\S]*?(?=\nRisk Alerts|\n---|\n##|$)/i,
+    /Pricing Impact Items[\s\S]*?(?=\n###|\nRisk Alerts|\n---|\n##[^#]|$)/i,
   );
+  console.log("[SUBMITTAL] Pricing section found:", !!pricingSection);
   if (pricingSection) {
+    console.log(
+      "[SUBMITTAL] Pricing section:",
+      pricingSection[0].substring(0, 300),
+    );
     const lines = pricingSection[0].split("\n");
     lines.forEach((line) => {
       // Match: "- Item Name:" or "* Item Name:"
       const match = line.match(/^[-*]\s*([^:]+):/);
       if (match) {
         const item = match[1].trim();
+        console.log("[SUBMITTAL] Found pricing item:", item);
         // Skip if similar item already exists
         if (
           !submittals.some((s) =>
