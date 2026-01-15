@@ -73,7 +73,13 @@ from db import (
     update_spec_status,
 )
 from parser import parse_spec
-from storage import download_pdf, upload_pdf
+from storage import (
+    delete_submittal_file,
+    download_pdf,
+    download_submittal_file,
+    upload_pdf,
+    upload_submittal_file,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # APP SETUP
@@ -739,6 +745,128 @@ async def delete_job_endpoint(job_id: str, user_id: str):
         raise
     except Exception as e:
         print(f"[DELETE] ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# SUBMITTAL FILE ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+
+class SubmittalUploadResponse(BaseModel):
+    r2_key: str
+    file_name: str
+    file_size: int
+
+
+class SubmittalDeleteRequest(BaseModel):
+    r2_key: str
+
+
+@app.post("/submittal/upload", response_model=SubmittalUploadResponse)
+async def upload_submittal(
+    file: UploadFile = File(...),
+    item_id: str = Form(...),
+):
+    """
+    Upload a PDF file for a submittal package item.
+    Stores in R2 at submittals/{item_id}/{timestamp}_{filename}.pdf
+    """
+    print(f"\n[SUBMITTAL] Upload request for item: {item_id}")
+    print(f"[SUBMITTAL] File: {file.filename}")
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    try:
+        pdf_bytes = await file.read()
+        file_size = len(pdf_bytes)
+        print(f"[SUBMITTAL] File size: {file_size:,} bytes")
+
+        r2_key = upload_submittal_file(item_id, file.filename, pdf_bytes)
+        print(f"[SUBMITTAL] Uploaded to R2: {r2_key}")
+
+        return SubmittalUploadResponse(
+            r2_key=r2_key,
+            file_name=file.filename,
+            file_size=file_size,
+        )
+
+    except Exception as e:
+        print(f"[SUBMITTAL] Upload ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/submittal/download/{r2_key:path}")
+async def download_submittal(r2_key: str):
+    """
+    Download a submittal PDF file from R2.
+    Returns the file as an attachment.
+    """
+    print(f"[SUBMITTAL] Download request: {r2_key}")
+
+    try:
+        pdf_bytes = download_submittal_file(r2_key)
+
+        # Extract filename from r2_key
+        filename = r2_key.split("/")[-1]
+
+        from fastapi.responses import Response
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        print(f"[SUBMITTAL] Download ERROR: {e}")
+        raise HTTPException(status_code=404, detail="File not found")
+
+
+@app.get("/submittal/file/{r2_key:path}")
+async def get_submittal_file(r2_key: str):
+    """
+    Get raw PDF bytes for a submittal file (used for PDF merging).
+    Returns the file inline without Content-Disposition header.
+    """
+    print(f"[SUBMITTAL] File request: {r2_key}")
+
+    try:
+        pdf_bytes = download_submittal_file(r2_key)
+
+        from fastapi.responses import Response
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+        )
+
+    except Exception as e:
+        print(f"[SUBMITTAL] File ERROR: {e}")
+        raise HTTPException(status_code=404, detail="File not found")
+
+
+@app.post("/submittal/delete")
+async def delete_submittal(request: SubmittalDeleteRequest):
+    """
+    Delete a submittal PDF file from R2.
+    """
+    print(f"[SUBMITTAL] Delete request: {request.r2_key}")
+
+    try:
+        success = delete_submittal_file(request.r2_key)
+
+        if success:
+            print(f"[SUBMITTAL] Deleted: {request.r2_key}")
+            return {"status": "deleted", "r2_key": request.r2_key}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete file")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SUBMITTAL] Delete ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

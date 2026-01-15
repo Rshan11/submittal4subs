@@ -2,6 +2,20 @@
 import { generateAndDownloadPDF } from "./pdf-generator.js";
 import { supabase } from "./lib/supabase.js";
 import { uploadSpec, parseSpec, analyzeSpec, API_BASE_URL } from "./lib/api.js";
+import {
+  isSubmittalFeatureEnabled,
+  createSubmittalPackage,
+  loadSubmittalPackage,
+  loadPackageForJob,
+  addSubmittalItem,
+  updateSubmittalItem,
+  deleteSubmittalItem,
+  uploadSubmittalFile,
+  deleteSubmittalFile,
+  parseSubmittalsFromAnalysis,
+  renderSubmittalGenerator,
+  combineSubmittalPackage,
+} from "./submittal-generator.js";
 
 // Division names lookup
 const DIVISION_NAMES = {
@@ -205,6 +219,7 @@ let currentSpecId = null;
 let storedJobId = null;
 let parseResult = null;
 let currentJobName = null;
+let currentSubmittalPackage = null;
 
 // DOM Elements
 const uploadSection = document.getElementById("uploadSection");
@@ -1339,7 +1354,28 @@ function displayResults(analysis) {
     html += '<div class="condensed-summary">';
     html += convertMarkdownToHTML(analysis.summary);
     html += "</div>";
+
+    // Submittal generator button (only show if feature enabled)
+    if (isSubmittalFeatureEnabled(currentUser?.id)) {
+      html += `
+        <div class="submittal-cta" style="margin-top: var(--space-lg); padding-top: var(--space-lg); border-top: 1px solid var(--border);">
+          <button class="create-submittals-btn" id="createSubmittalsBtn">
+            📋 Create Submittals
+          </button>
+          <span style="margin-left: var(--space-sm); color: var(--text-muted); font-size: 13px;">
+            Generate a submittal package from this analysis
+          </span>
+        </div>
+      `;
+    }
+
     resultsContent.innerHTML = html;
+
+    // Event listener for the submittal button
+    document
+      .getElementById("createSubmittalsBtn")
+      ?.addEventListener("click", handleCreateSubmittals);
+
     showSection("results");
     return;
   }
@@ -1588,6 +1624,10 @@ function showSection(section) {
   errorSection.style.display = "none";
   if (divisionSection) divisionSection.style.display = "none";
 
+  // Hide submittal section if it exists
+  const submittalSection = document.getElementById("submittalSection");
+  if (submittalSection) submittalSection.style.display = "none";
+
   switch (section) {
     case "upload":
       uploadSection.style.display = "block";
@@ -1604,7 +1644,202 @@ function showSection(section) {
     case "division":
       if (divisionSection) divisionSection.style.display = "block";
       break;
+    case "submittal":
+      if (submittalSection) submittalSection.style.display = "block";
+      break;
   }
+}
+
+// ============================================================================
+// SUBMITTAL GENERATOR HANDLERS
+// ============================================================================
+
+async function handleCreateSubmittals() {
+  if (!analysisResult || !currentUser?.id) {
+    showError("No analysis results available");
+    return;
+  }
+
+  const targetJobId = storedJobId || jobId;
+  if (!targetJobId) {
+    showError("No job ID found");
+    return;
+  }
+
+  try {
+    // Show loading
+    const btn = document.getElementById("createSubmittalsBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Creating...";
+    }
+
+    // Check if package already exists for this job
+    let pkg = await loadPackageForJob(targetJobId);
+
+    if (!pkg) {
+      // Parse submittals from the analysis
+      const parsedItems = parseSubmittalsFromAnalysis(analysisResult);
+      console.log("[SUBMITTAL] Parsed items from analysis:", parsedItems);
+
+      // Create new package
+      const jobName =
+        currentJobName || currentFile?.name?.replace(".pdf", "") || "Project";
+      pkg = await createSubmittalPackage(
+        currentUser.id,
+        targetJobId,
+        jobName,
+        parsedItems,
+      );
+    }
+
+    // Load full package with items
+    currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
+
+    // Show submittal generator UI
+    showSubmittalGenerator();
+  } catch (error) {
+    console.error("[SUBMITTAL] Error creating submittals:", error);
+    showError("Failed to create submittal package: " + error.message);
+
+    // Reset button
+    const btn = document.getElementById("createSubmittalsBtn");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "📋 Create Submittals";
+    }
+  }
+}
+
+async function showSubmittalGenerator() {
+  // Hide other sections
+  if (uploadSection) uploadSection.style.display = "none";
+  if (divisionSection) divisionSection.style.display = "none";
+  if (loadingSection) loadingSection.style.display = "none";
+  if (resultsSection) resultsSection.style.display = "none";
+  if (errorSection) errorSection.style.display = "none";
+
+  // Create or show submittal section
+  let submittalSection = document.getElementById("submittalSection");
+  if (!submittalSection) {
+    submittalSection = document.createElement("div");
+    submittalSection.id = "submittalSection";
+    submittalSection.className = "card";
+
+    // Insert after results section
+    resultsSection.parentNode.insertBefore(
+      submittalSection,
+      resultsSection.nextSibling,
+    );
+  }
+
+  submittalSection.style.display = "block";
+
+  // Load user profile for company info
+  const { data: userProfile } = await supabase
+    .from("user_profiles")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .single();
+
+  // Render the generator
+  renderSubmittalGenerator(submittalSection, currentSubmittalPackage, {
+    onBack: () => {
+      submittalSection.style.display = "none";
+      showSection("results");
+    },
+
+    onAddItem: async () => {
+      try {
+        await addSubmittalItem(currentSubmittalPackage.id, {
+          description: "New Submittal Item",
+        });
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        showError("Failed to add item: " + error.message);
+      }
+    },
+
+    onUpdateItem: async (itemId, updates) => {
+      try {
+        await updateSubmittalItem(itemId, updates);
+        // Don't reload full UI for inline edits
+      } catch (error) {
+        console.error("Failed to update item:", error);
+      }
+    },
+
+    onDeleteItem: async (itemId) => {
+      try {
+        await deleteSubmittalItem(itemId);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        showError("Failed to delete item: " + error.message);
+      }
+    },
+
+    onUploadFile: async (itemId, file) => {
+      try {
+        await uploadSubmittalFile(itemId, file);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        showError("Failed to upload file: " + error.message);
+      }
+    },
+
+    onDeleteFile: async (fileId, r2Key) => {
+      try {
+        await deleteSubmittalFile(fileId, r2Key);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        showError("Failed to delete file: " + error.message);
+      }
+    },
+
+    onCombine: async () => {
+      try {
+        // Show loading overlay
+        const overlay = document.createElement("div");
+        overlay.className = "submittal-loading-overlay";
+        overlay.innerHTML = `
+          <div class="submittal-loading-content">
+            <div class="loading-spinner"></div>
+            <h3>Generating Package</h3>
+            <p>Combining cover sheet, table of contents, and all attachments...</p>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+
+        await combineSubmittalPackage(currentSubmittalPackage, userProfile);
+
+        // Remove overlay
+        overlay.remove();
+
+        // Reload to show updated status
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+
+        alert("Submittal package generated and downloaded!");
+      } catch (error) {
+        document.querySelector(".submittal-loading-overlay")?.remove();
+        showError("Failed to generate package: " + error.message);
+      }
+    },
+  });
 }
 
 function updateLoadingStatus(message, progress = null) {
