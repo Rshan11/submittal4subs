@@ -526,6 +526,7 @@ async function handleCreateSubmittals() {
 
     // Check if package already exists
     let pkg = await loadPackageForJob(jobId);
+    console.log("[SUBMITTAL] Existing package:", pkg);
 
     if (!pkg) {
       // Parse submittals from analysis
@@ -545,6 +546,8 @@ async function handleCreateSubmittals() {
         job?.job_name || "Project",
         parsedItems,
       );
+    } else {
+      console.log("[SUBMITTAL] Using existing package, skipping parse");
     }
 
     currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
