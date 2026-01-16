@@ -1356,6 +1356,15 @@ select.form-control,
     box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
 }
 
+.submittal-card.has-files {
+    border-color: #10b981;
+    border-left-width: 4px;
+}
+
+.submittal-card.has-files .submittal-card-header {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
 /* Card Header */
 .submittal-card-header {
     display: flex;

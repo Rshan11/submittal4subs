@@ -494,12 +494,9 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
       e.stopPropagation();
       card.classList.remove("drag-over");
 
-      const files = Array.from(e.dataTransfer.files).filter(
-        (f) => f.type === "application/pdf",
-      );
+      const files = Array.from(e.dataTransfer.files);
 
       if (files.length === 0) {
-        alert("Please drop PDF files only");
         return;
       }
 
@@ -562,8 +559,10 @@ function renderSubmittalCard(item, index) {
   const files = item.submittal_package_files || [];
   const submittalNumber = String(index + 1).padStart(3, "0");
 
+  const hasFiles = files.length > 0;
+
   return `
-    <div class="submittal-card dropzone" data-item-id="${item.id}">
+    <div class="submittal-card dropzone${hasFiles ? " has-files" : ""}" data-item-id="${item.id}">
       <div class="submittal-card-header">
         <span class="submittal-number">#${submittalNumber}</span>
         <button class="btn btn-ghost btn-sm delete-item-btn" title="Delete item">
@@ -597,8 +596,8 @@ function renderSubmittalCard(item, index) {
       <div class="submittal-card-files">
         <div class="files-header">
           <span>📎 Attachments (${files.length})</span>
-          <button class="btn btn-ghost btn-sm upload-file-btn">+ Add PDF</button>
-          <input type="file" class="file-input" accept=".pdf" multiple hidden>
+          <button class="btn btn-ghost btn-sm upload-file-btn">+ Add File</button>
+          <input type="file" class="file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.rtf,.txt,.jpg,.jpeg,.png,.gif,.tif,.tiff" multiple hidden>
         </div>
 
         <div class="files-list">
