@@ -769,21 +769,52 @@ async def upload_submittal(
     item_id: str = Form(...),
 ):
     """
-    Upload a PDF file for a submittal package item.
-    Stores in R2 at submittals/{item_id}/{timestamp}_{filename}.pdf
+    Upload a file for a submittal package item.
+    Stores in R2 at submittals/{item_id}/{timestamp}_{filename}
+    Accepts: PDF, Word, Excel, RTF, images, and other common file types.
     """
     print(f"\n[SUBMITTAL] Upload request for item: {item_id}")
     print(f"[SUBMITTAL] File: {file.filename}")
 
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
+    # Get file extension and validate it's a supported type
+    allowed_extensions = {
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".rtf",
+        ".txt",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".csv",
+        ".ppt",
+        ".pptx",
+        ".odt",
+        ".ods",
+        ".odp",
+    }
+
+    import os
+
+    ext = os.path.splitext(file.filename.lower())[1]
+    if ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not supported. Allowed: PDF, Word, Excel, RTF, images, etc.",
+        )
 
     try:
-        pdf_bytes = await file.read()
-        file_size = len(pdf_bytes)
+        file_bytes = await file.read()
+        file_size = len(file_bytes)
         print(f"[SUBMITTAL] File size: {file_size:,} bytes")
 
-        r2_key = upload_submittal_file(item_id, file.filename, pdf_bytes)
+        r2_key = upload_submittal_file(item_id, file.filename, file_bytes)
         print(f"[SUBMITTAL] Uploaded to R2: {r2_key}")
 
         return SubmittalUploadResponse(
@@ -800,22 +831,48 @@ async def upload_submittal(
 @app.get("/submittal/download/{r2_key:path}")
 async def download_submittal(r2_key: str):
     """
-    Download a submittal PDF file from R2.
+    Download a submittal file from R2.
     Returns the file as an attachment.
     """
     print(f"[SUBMITTAL] Download request: {r2_key}")
 
-    try:
-        pdf_bytes = download_submittal_file(r2_key)
+    # MIME type mapping
+    mime_types = {
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".rtf": "application/rtf",
+        ".txt": "text/plain",
+        ".csv": "text/csv",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".bmp": "image/bmp",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".odt": "application/vnd.oasis.opendocument.text",
+        ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+        ".odp": "application/vnd.oasis.opendocument.presentation",
+    }
 
-        # Extract filename from r2_key
+    try:
+        file_bytes = download_submittal_file(r2_key)
+
+        # Extract filename from r2_key and determine MIME type
         filename = r2_key.split("/")[-1]
+        ext = os.path.splitext(filename.lower())[1]
+        content_type = mime_types.get(ext, "application/octet-stream")
 
         from fastapi.responses import Response
 
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
+            content=file_bytes,
+            media_type=content_type,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 

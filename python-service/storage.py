@@ -67,16 +67,46 @@ def delete_pdf(r2_key: str) -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 
-def upload_submittal_file(item_id: str, filename: str, pdf_bytes: bytes) -> str:
+def upload_submittal_file(item_id: str, filename: str, file_bytes: bytes) -> str:
     """
-    Upload a submittal PDF to R2 storage.
-    Path: submittals/{item_id}/{timestamp}_{safe_filename}.pdf
+    Upload a submittal file to R2 storage.
+    Path: submittals/{item_id}/{timestamp}_{safe_filename}
     Returns the R2 key.
+    Supports: PDF, Word, Excel, RTF, images, and other common file types.
     """
+    import os
     import re
     import time
 
     client = get_r2_client()
+
+    # MIME type mapping
+    mime_types = {
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".rtf": "application/rtf",
+        ".txt": "text/plain",
+        ".csv": "text/csv",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".bmp": "image/bmp",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".odt": "application/vnd.oasis.opendocument.text",
+        ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+        ".odp": "application/vnd.oasis.opendocument.presentation",
+    }
+
+    # Get content type based on extension
+    ext = os.path.splitext(filename.lower())[1]
+    content_type = mime_types.get(ext, "application/octet-stream")
 
     # Generate safe filename
     timestamp = int(time.time() * 1000)
@@ -84,7 +114,7 @@ def upload_submittal_file(item_id: str, filename: str, pdf_bytes: bytes) -> str:
     r2_key = f"submittals/{item_id}/{timestamp}_{safe_name}"
 
     client.put_object(
-        Bucket=R2_BUCKET_NAME, Key=r2_key, Body=pdf_bytes, ContentType="application/pdf"
+        Bucket=R2_BUCKET_NAME, Key=r2_key, Body=file_bytes, ContentType=content_type
     )
 
     return r2_key
