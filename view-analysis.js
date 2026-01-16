@@ -11,6 +11,7 @@ import {
   deleteSubmittalItem,
   uploadSubmittalFile,
   deleteSubmittalFile,
+  reorderSubmittalFile,
   extractSubmittalsFromAnalysis,
   renderSubmittalGenerator,
   combineSubmittalPackage,
@@ -768,6 +769,20 @@ async function showSubmittalGenerator() {
         showSubmittalGenerator();
       } catch (error) {
         alert("Failed to delete file: " + error.message);
+      }
+    },
+
+    onReorderFile: async (fileId1, newOrder1, fileId2, newOrder2) => {
+      try {
+        // Swap the sort orders of the two files
+        await reorderSubmittalFile(fileId1, newOrder1);
+        await reorderSubmittalFile(fileId2, newOrder2);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to reorder file: " + error.message);
       }
     },
 

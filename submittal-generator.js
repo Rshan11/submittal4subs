@@ -305,6 +305,20 @@ export async function deleteSubmittalFile(fileId, r2Key) {
   }
 }
 
+export async function reorderSubmittalFile(fileId, newSortOrder) {
+  try {
+    const { error } = await supabase
+      .from("submittal_package_files")
+      .update({ sort_order: newSortOrder })
+      .eq("id", fileId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error("[SUBMITTAL] Error reordering file:", error);
+    throw error;
+  }
+}
+
 // Helper to get file download URL
 export function getSubmittalFileUrl(r2Key) {
   return `${API_BASE_URL}/submittal/file/${r2Key}`;
@@ -391,6 +405,7 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
     onDeleteItem,
     onUploadFile,
     onDeleteFile,
+    onReorderFile,
     onCombine,
     onBack,
   } = callbacks;
@@ -529,6 +544,46 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
       });
     });
 
+    // Reorder files - move up
+    card.querySelectorAll(".file-move-up").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const fileId = btn.dataset.fileId;
+        const fileItem = btn.closest(".file-item");
+        const prevItem = fileItem.previousElementSibling;
+        if (prevItem && prevItem.classList.contains("file-item")) {
+          const currentOrder = parseInt(fileItem.dataset.sortOrder) || 0;
+          const prevOrder = parseInt(prevItem.dataset.sortOrder) || 0;
+          onReorderFile?.(
+            fileId,
+            prevOrder,
+            prevItem.dataset.fileId,
+            currentOrder,
+          );
+        }
+      });
+    });
+
+    // Reorder files - move down
+    card.querySelectorAll(".file-move-down").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const fileId = btn.dataset.fileId;
+        const fileItem = btn.closest(".file-item");
+        const nextItem = fileItem.nextElementSibling;
+        if (nextItem && nextItem.classList.contains("file-item")) {
+          const currentOrder = parseInt(fileItem.dataset.sortOrder) || 0;
+          const nextOrder = parseInt(nextItem.dataset.sortOrder) || 0;
+          onReorderFile?.(
+            fileId,
+            nextOrder,
+            nextItem.dataset.fileId,
+            currentOrder,
+          );
+        }
+      });
+    });
+
     // Drag and drop file upload
     card.addEventListener("dragover", (e) => {
       e.preventDefault();
@@ -659,8 +714,18 @@ function renderSubmittalCard(item, index) {
             files.length > 0
               ? files
                   .map(
-                    (f) => `
-                <div class="file-item">
+                    (f, idx) => `
+                <div class="file-item" data-file-id="${f.id}" data-sort-order="${f.sort_order || idx}">
+                  ${
+                    files.length > 1
+                      ? `
+                  <div class="file-reorder-btns">
+                    <button class="btn btn-ghost btn-xs file-move-up" data-file-id="${f.id}" ${idx === 0 ? "disabled" : ""} title="Move up">▲</button>
+                    <button class="btn btn-ghost btn-xs file-move-down" data-file-id="${f.id}" ${idx === files.length - 1 ? "disabled" : ""} title="Move down">▼</button>
+                  </div>
+                  `
+                      : ""
+                  }
                   <span class="file-icon">📄</span>
                   <span class="file-name">${f.file_name}</span>
                   <span class="file-size">${formatFileSize(f.file_size)}</span>

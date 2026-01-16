@@ -1515,6 +1515,41 @@ select.form-control,
     color: var(--danger);
 }
 
+/* File reorder buttons */
+.file-reorder-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.file-reorder-btns button {
+    padding: 0 4px !important;
+    font-size: 10px !important;
+    line-height: 1 !important;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.file-reorder-btns button:hover:not(:disabled) {
+    opacity: 1;
+    color: var(--primary);
+}
+
+.file-reorder-btns button:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+}
+
+.btn-xs {
+    padding: 2px 4px;
+    font-size: 10px;
+}
+
 .no-files {
     color: #64748b;
     font-size: 12px;
