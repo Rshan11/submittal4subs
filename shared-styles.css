@@ -1381,11 +1381,18 @@ select.form-control,
     font-weight: 700;
 }
 
+.submittal-card-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.submittal-card-header .duplicate-item-btn,
 .submittal-card-header .delete-item-btn {
     color: rgba(255, 255, 255, 0.7);
     padding: 4px 8px;
 }
 
+.submittal-card-header .duplicate-item-btn:hover,
 .submittal-card-header .delete-item-btn:hover {
     color: white;
     background: rgba(255, 255, 255, 0.1);

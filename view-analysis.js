@@ -6,6 +6,7 @@ import {
   loadSubmittalPackage,
   loadPackageForJob,
   addSubmittalItem,
+  duplicateSubmittalItem,
   updateSubmittalItem,
   deleteSubmittalItem,
   uploadSubmittalFile,
@@ -711,6 +712,18 @@ async function showSubmittalGenerator() {
         showSubmittalGenerator();
       } catch (error) {
         alert("Failed to add item: " + error.message);
+      }
+    },
+
+    onDuplicateItem: async (itemId) => {
+      try {
+        await duplicateSubmittalItem(itemId);
+        currentSubmittalPackage = await loadSubmittalPackage(
+          currentSubmittalPackage.id,
+        );
+        showSubmittalGenerator();
+      } catch (error) {
+        alert("Failed to duplicate item: " + error.message);
       }
     },
 

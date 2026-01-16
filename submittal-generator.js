@@ -165,6 +165,50 @@ export async function updateSubmittalItem(itemId, updates) {
   }
 }
 
+export async function duplicateSubmittalItem(itemId) {
+  try {
+    // Get the original item
+    const { data: original, error: fetchError } = await supabase
+      .from("submittal_package_items")
+      .select("*")
+      .eq("id", itemId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // Get current max sort_order
+    const { data: existing } = await supabase
+      .from("submittal_package_items")
+      .select("sort_order")
+      .eq("package_id", original.package_id)
+      .order("sort_order", { ascending: false })
+      .limit(1);
+
+    const nextOrder =
+      existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
+
+    // Create duplicate with same data
+    const { data, error } = await supabase
+      .from("submittal_package_items")
+      .insert({
+        package_id: original.package_id,
+        spec_section: original.spec_section,
+        description: original.description + " (copy)",
+        manufacturer: original.manufacturer,
+        sort_order: nextOrder,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log("[SUBMITTAL] Duplicated item:", data.id);
+    return data;
+  } catch (error) {
+    console.error("[SUBMITTAL] Error duplicating item:", error);
+    throw error;
+  }
+}
+
 export async function deleteSubmittalItem(itemId) {
   try {
     const { error } = await supabase
@@ -342,6 +386,7 @@ export async function extractSubmittalsFromAnalysis(analysisResult) {
 export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
   const {
     onAddItem,
+    onDuplicateItem,
     onUpdateItem,
     onDeleteItem,
     onUploadFile,
@@ -428,6 +473,14 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
   // Card event listeners
   container.querySelectorAll(".submittal-card").forEach((card) => {
     const itemId = card.dataset.itemId;
+
+    // Duplicate item
+    card
+      .querySelector(".duplicate-item-btn")
+      ?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onDuplicateItem?.(itemId);
+      });
 
     // Delete item
     card.querySelector(".delete-item-btn")?.addEventListener("click", (e) => {
@@ -565,9 +618,10 @@ function renderSubmittalCard(item, index) {
     <div class="submittal-card dropzone${hasFiles ? " has-files" : ""}" data-item-id="${item.id}">
       <div class="submittal-card-header">
         <span class="submittal-number">#${submittalNumber}</span>
-        <button class="btn btn-ghost btn-sm delete-item-btn" title="Delete item">
-          🗑️
-        </button>
+        <div class="submittal-card-actions">
+          <button class="btn btn-ghost btn-sm duplicate-item-btn" title="Duplicate item">📋</button>
+          <button class="btn btn-ghost btn-sm delete-item-btn" title="Delete item">🗑️</button>
+        </div>
       </div>
 
       <div class="submittal-card-body">
