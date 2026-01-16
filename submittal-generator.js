@@ -475,6 +475,36 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
         }
       });
     });
+
+    // Drag and drop file upload
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      card.classList.add("drag-over");
+    });
+
+    card.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      card.classList.remove("drag-over");
+    });
+
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      card.classList.remove("drag-over");
+
+      const files = Array.from(e.dataTransfer.files).filter(
+        (f) => f.type === "application/pdf",
+      );
+
+      if (files.length === 0) {
+        alert("Please drop PDF files only");
+        return;
+      }
+
+      files.forEach((file) => onUploadFile?.(itemId, file));
+    });
   });
 
   // Initialize drag-and-drop on sidebar
@@ -533,7 +563,7 @@ function renderSubmittalCard(item, index) {
   const submittalNumber = String(index + 1).padStart(3, "0");
 
   return `
-    <div class="submittal-card" data-item-id="${item.id}">
+    <div class="submittal-card dropzone" data-item-id="${item.id}">
       <div class="submittal-card-header">
         <span class="submittal-number">#${submittalNumber}</span>
         <button class="btn btn-ghost btn-sm delete-item-btn" title="Delete item">

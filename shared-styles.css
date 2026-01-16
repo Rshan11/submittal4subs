@@ -1348,6 +1348,14 @@ select.form-control,
     box-shadow: var(--shadow-md);
 }
 
+.submittal-card.drag-over {
+    border-color: #10b981;
+    border-style: dashed;
+    border-width: 2px;
+    background: rgba(16, 185, 129, 0.05);
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
+}
+
 /* Card Header */
 .submittal-card-header {
     display: flex;
