@@ -1480,7 +1480,38 @@ select.form-control,
 }
 
 /* ==========================================
-   CREATE SUBMITTALS BUTTON (in results)
+   SUBMITTALS BUTTON (header - orange/amber)
+   ========================================== */
+
+.submittals-btn {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-btn);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.submittals-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
+.submittals-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ==========================================
+   CREATE SUBMITTALS BUTTON (in results - blue)
    ========================================== */
 
 .create-submittals-btn {

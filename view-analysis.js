@@ -85,8 +85,8 @@ document
   .getElementById("downloadPdfBtn")
   ?.addEventListener("click", downloadPDF);
 document
-  .getElementById("createSubmittalsBtn")
-  ?.addEventListener("click", handleCreateSubmittals);
+  .getElementById("viewSubmittalsBtn")
+  ?.addEventListener("click", handleViewSubmittals);
 
 async function loadAnalysis() {
   if (!analysisId) {
@@ -123,16 +123,9 @@ async function loadAnalysis() {
 
     // Show submittal button if feature enabled
     if (isSubmittalFeatureEnabled(currentUser?.id)) {
-      const btn = document.getElementById("createSubmittalsBtn");
+      const btn = document.getElementById("viewSubmittalsBtn");
       if (btn) {
         btn.style.display = "inline-flex";
-        // Check if package already exists for this job
-        if (data.job_id) {
-          const existingPkg = await loadPackageForJob(data.job_id);
-          if (existingPkg) {
-            btn.innerHTML = "📋 View Submittals";
-          }
-        }
       }
     }
 
@@ -526,6 +519,73 @@ async function downloadPDF() {
 // SUBMITTAL GENERATOR
 // ============================================================================
 
+// Handle the orange "Submittals" button at top - goes directly to submittals
+async function handleViewSubmittals() {
+  if (!currentAnalysis || !currentUser?.id) {
+    alert("No analysis available");
+    return;
+  }
+
+  const jobId = currentAnalysis.job_id;
+  if (!jobId) {
+    alert("No job ID found");
+    return;
+  }
+
+  const btn = document.getElementById("viewSubmittalsBtn");
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Loading...";
+    }
+
+    // Check if package already exists
+    let pkg = await loadPackageForJob(jobId);
+
+    if (!pkg) {
+      // No package yet - create one with AI extraction
+      if (btn) btn.innerHTML = "⏳ Creating...";
+
+      const parsedItems = await extractSubmittalsFromAnalysis(
+        currentAnalysis.result,
+      );
+      console.log("[SUBMITTAL] AI extracted items:", parsedItems);
+
+      const { data: job } = await supabase
+        .from("jobs")
+        .select("job_name")
+        .eq("id", jobId)
+        .single();
+
+      pkg = await createSubmittalPackage(
+        currentUser.id,
+        jobId,
+        job?.job_name || "Project",
+        parsedItems,
+      );
+    }
+
+    currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "📋 Submittals";
+    }
+
+    showSubmittalGenerator();
+  } catch (error) {
+    console.error("[SUBMITTAL] Error:", error);
+    alert("Failed to load submittals: " + error.message);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "📋 Submittals";
+    }
+  }
+}
+
+// Handle the blue "Create Submittals" button at bottom of results
 async function handleCreateSubmittals() {
   if (!currentAnalysis || !currentUser?.id) {
     alert("No analysis available");
@@ -538,7 +598,7 @@ async function handleCreateSubmittals() {
     return;
   }
 
-  const btn = document.getElementById("createSubmittalsBtn");
+  const btn = document.getElementById("createSubmittalsBtnBottom");
 
   try {
     if (btn) {
@@ -548,12 +608,8 @@ async function handleCreateSubmittals() {
 
     // Check if package already exists
     let pkg = await loadPackageForJob(jobId);
-    console.log("[SUBMITTAL] Existing package:", pkg);
-    console.log("[SUBMITTAL] Job ID:", jobId);
-    console.log("[SUBMITTAL] currentAnalysis.result:", currentAnalysis.result);
 
     if (!pkg) {
-      console.log("[SUBMITTAL] No existing package, calling AI extraction...");
       // Extract submittals from analysis using AI
       const parsedItems = await extractSubmittalsFromAnalysis(
         currentAnalysis.result,
@@ -573,13 +629,10 @@ async function handleCreateSubmittals() {
         job?.job_name || "Project",
         parsedItems,
       );
-    } else {
-      console.log("[SUBMITTAL] Using existing package, skipping parse");
     }
 
     currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
 
-    // Update button to show "View Submittals" since package now exists
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = "📋 View Submittals";
@@ -635,12 +688,6 @@ async function showSubmittalGenerator() {
       if (resultsCard) resultsCard.style.display = "block";
       const actionButtons = document.querySelector(".action-buttons");
       if (actionButtons) actionButtons.style.display = "flex";
-      // Reset button state
-      const btn = document.getElementById("createSubmittalsBtn");
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = "📋 View Submittals";
-      }
     },
 
     onAddItem: async () => {
