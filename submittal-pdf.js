@@ -7,6 +7,18 @@ import { API_BASE_URL } from "./lib/api.js";
 // Make sure to add: npm install pdf-lib
 // Or include via CDN in HTML: https://unpkg.com/pdf-lib/dist/pdf-lib.min.js
 
+// Helper to clean placeholder text
+function cleanField(value) {
+  if (!value) return null;
+  if (value.toLowerCase().includes("click to add")) return null;
+  return value.trim();
+}
+
+// Helper to check if file is a PDF
+function isPDFFile(filename) {
+  return filename.toLowerCase().endsWith(".pdf");
+}
+
 export async function generateSubmittalPackagePDF(options) {
   const { projectName, companyName, companyLogoUrl, items, generatedDate } =
     options;
@@ -27,6 +39,7 @@ export async function generateSubmittalPackagePDF(options) {
   const primaryColor = rgb(21 / 255, 84 / 255, 161 / 255); // PM4Subs blue
   const textColor = rgb(31 / 255, 41 / 255, 55 / 255);
   const mutedColor = rgb(107 / 255, 114 / 255, 128 / 255);
+  const warningColor = rgb(0.7, 0.5, 0.1);
 
   // ============================================
   // COVER SHEET
@@ -140,9 +153,11 @@ export async function generateSubmittalPackagePDF(options) {
 
   items.forEach((item, index) => {
     const num = String(index + 1).padStart(3, "0");
-    const section = item.spec_section || "—";
-    const desc = item.description || "Untitled";
-    const mfr = item.manufacturer ? ` (${item.manufacturer})` : "";
+
+    // Clean fields - filter out placeholder text
+    const section = cleanField(item.spec_section);
+    const desc = cleanField(item.description) || "Untitled";
+    const mfr = cleanField(item.manufacturer);
 
     // Submittal number
     tocPage.drawText(num, {
@@ -153,35 +168,47 @@ export async function generateSubmittalPackagePDF(options) {
       color: primaryColor,
     });
 
-    // Section
-    tocPage.drawText(section, {
-      x: 110,
-      y: tocY,
-      size: 11,
-      font: helvetica,
-      color: textColor,
-    });
+    // Section (only show if it has a real value)
+    if (section) {
+      tocPage.drawText(section, {
+        x: 110,
+        y: tocY,
+        size: 11,
+        font: helvetica,
+        color: textColor,
+      });
+    }
 
     // Description (truncate if too long)
-    const maxDescLength = 50;
-    const truncatedDesc =
+    const maxDescLength = 45;
+    let displayText =
       desc.length > maxDescLength
         ? desc.substring(0, maxDescLength) + "..."
         : desc;
 
-    tocPage.drawText(truncatedDesc + mfr, {
-      x: 200,
+    // Add manufacturer if present
+    if (mfr) {
+      const mfrSuffix = ` (${mfr})`;
+      if (displayText.length + mfrSuffix.length > 55) {
+        displayText = displayText.substring(0, 55 - mfrSuffix.length) + "...";
+      }
+      displayText += mfrSuffix;
+    }
+
+    tocPage.drawText(displayText, {
+      x: section ? 200 : 110, // Shift left if no section
       y: tocY,
       size: 11,
       font: helvetica,
       color: textColor,
     });
 
-    // File count
+    // File count (right-aligned)
     const fileCount = item.submittal_package_files?.length || 0;
     const fileText = `${fileCount} file${fileCount !== 1 ? "s" : ""}`;
+    const fileTextWidth = helvetica.widthOfTextAtSize(fileText, 10);
     tocPage.drawText(fileText, {
-      x: pageWidth - 100,
+      x: pageWidth - 72 - fileTextWidth,
       y: tocY,
       size: 10,
       font: helvetica,
@@ -205,6 +232,11 @@ export async function generateSubmittalPackagePDF(options) {
     const item = items[i];
     const num = String(i + 1).padStart(3, "0");
 
+    // Clean fields - filter out placeholder text
+    const specSection = cleanField(item.spec_section);
+    const description = cleanField(item.description) || "Untitled";
+    const manufacturer = cleanField(item.manufacturer);
+
     // --- DIVIDER PAGE ---
     const dividerPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
@@ -218,9 +250,9 @@ export async function generateSubmittalPackagePDF(options) {
       color: primaryColor,
     });
 
-    // Spec section
-    if (item.spec_section) {
-      const sectionText = `Section ${item.spec_section}`;
+    // Spec section (only if it has a real value)
+    if (specSection) {
+      const sectionText = `Section ${specSection}`;
       dividerPage.drawText(sectionText, {
         x: (pageWidth - helvetica.widthOfTextAtSize(sectionText, 14)) / 2,
         y: pageHeight / 2 + 20,
@@ -231,20 +263,18 @@ export async function generateSubmittalPackagePDF(options) {
     }
 
     // Description
-    const descText = item.description || "Untitled";
-    dividerPage.drawText(descText, {
-      x: (pageWidth - helveticaBold.widthOfTextAtSize(descText, 18)) / 2,
+    dividerPage.drawText(description, {
+      x: (pageWidth - helveticaBold.widthOfTextAtSize(description, 18)) / 2,
       y: pageHeight / 2 - 20,
       size: 18,
       font: helveticaBold,
       color: textColor,
     });
 
-    // Manufacturer
-    if (item.manufacturer) {
-      const mfrText = item.manufacturer;
-      dividerPage.drawText(mfrText, {
-        x: (pageWidth - helvetica.widthOfTextAtSize(mfrText, 14)) / 2,
+    // Manufacturer (only if it has a real value)
+    if (manufacturer) {
+      dividerPage.drawText(manufacturer, {
+        x: (pageWidth - helvetica.widthOfTextAtSize(manufacturer, 14)) / 2,
         y: pageHeight / 2 - 50,
         size: 14,
         font: helvetica,
@@ -252,10 +282,71 @@ export async function generateSubmittalPackagePDF(options) {
       });
     }
 
-    // --- CONTENT PAGES (merge PDFs) ---
+    // --- CONTENT PAGES (merge PDFs or show placeholder for non-PDFs) ---
     const files = item.submittal_package_files || [];
 
     for (const file of files) {
+      // Check if file is a PDF
+      if (!isPDFFile(file.file_name)) {
+        // Create a placeholder page for non-PDF files
+        console.warn(`[PDF] Skipping non-PDF file: ${file.file_name}`);
+
+        const placeholderPage = pdfDoc.addPage([pageWidth, pageHeight]);
+
+        // Header
+        placeholderPage.drawText("ATTACHMENT", {
+          x: 72,
+          y: pageHeight - 72,
+          size: 14,
+          font: helveticaBold,
+          color: primaryColor,
+        });
+
+        // File name
+        placeholderPage.drawText(file.file_name, {
+          x: 72,
+          y: pageHeight / 2 + 20,
+          size: 16,
+          font: helveticaBold,
+          color: textColor,
+        });
+
+        // Explanation
+        placeholderPage.drawText(
+          "This file type cannot be embedded in the PDF.",
+          {
+            x: 72,
+            y: pageHeight / 2 - 10,
+            size: 12,
+            font: helvetica,
+            color: mutedColor,
+          },
+        );
+
+        placeholderPage.drawText(
+          "Please refer to the original uploaded file.",
+          {
+            x: 72,
+            y: pageHeight / 2 - 30,
+            size: 12,
+            font: helvetica,
+            color: mutedColor,
+          },
+        );
+
+        // File type note
+        const ext = file.file_name.split(".").pop()?.toUpperCase() || "FILE";
+        placeholderPage.drawText(`File type: ${ext}`, {
+          x: 72,
+          y: pageHeight / 2 - 60,
+          size: 11,
+          font: helvetica,
+          color: warningColor,
+        });
+
+        continue;
+      }
+
       try {
         // Fetch the PDF file from R2 via Python service
         const fileUrl = `${API_BASE_URL}/submittal/file/${file.r2_key}`;

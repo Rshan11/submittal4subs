@@ -14,7 +14,8 @@
       "Bash(cat:*)",
       "Bash(python -m uvicorn:*)",
       "mcp__acp__Edit",
-      "mcp__acp__Bash"
+      "mcp__acp__Bash",
+      "mcp__acp__Write"
     ],
     "deny": [],
     "ask": []

@@ -770,11 +770,24 @@ export async function combineSubmittalPackage(pkg, userProfile) {
       .eq("id", fullPkg.job_id)
       .single();
 
+    // Get company name from profile - try multiple possible field names
+    const companyName =
+      userProfile?.company_name ||
+      userProfile?.company_name_pending ||
+      userProfile?.company ||
+      "Company Name";
+
+    // Get company logo URL if available
+    let companyLogoUrl = null;
+    if (userProfile?.company_logo_r2_key) {
+      companyLogoUrl = `${API_BASE_URL}/submittal/file/${userProfile.company_logo_r2_key}`;
+    }
+
     // Generate PDF
     const pdfBlob = await generateSubmittalPackagePDF({
       projectName: job?.job_name || "Project",
-      companyName: userProfile?.company_name_pending || "Company",
-      companyLogoUrl: userProfile?.company_logo_r2_key || null,
+      companyName: companyName,
+      companyLogoUrl: companyLogoUrl,
       items: fullPkg.items,
       generatedDate: new Date().toISOString(),
     });
