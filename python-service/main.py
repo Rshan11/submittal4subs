@@ -1067,6 +1067,188 @@ Analysis text:
 
 
 # ═══════════════════════════════════════════════════════════════
+# FILE CONVERSION (for submittal package PDF merging)
+# ═══════════════════════════════════════════════════════════════
+
+
+@app.get("/submittal/file-as-pdf/{r2_key:path}")
+async def get_submittal_file_as_pdf(r2_key: str):
+    """
+    Get a submittal file as PDF. If it's already a PDF, return as-is.
+    If it's a convertible format (doc, docx, rtf, etc.), convert to PDF first.
+    Uses LibreOffice for conversion on supported systems.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    print(f"[SUBMITTAL] File-as-PDF request: {r2_key}")
+
+    # Extract filename and extension
+    filename = r2_key.split("/")[-1]
+    ext = os.path.splitext(filename.lower())[1]
+
+    # Convertible extensions
+    convertible_extensions = {
+        ".doc",
+        ".docx",
+        ".rtf",
+        ".txt",
+        ".odt",
+        ".xls",
+        ".xlsx",
+        ".ods",
+        ".csv",
+        ".ppt",
+        ".pptx",
+        ".odp",
+    }
+
+    # Image extensions (convert via different method)
+    image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".bmp"}
+
+    try:
+        file_bytes = download_submittal_file(r2_key)
+
+        # If already PDF, return as-is
+        if ext == ".pdf":
+            from fastapi.responses import Response
+
+            return Response(content=file_bytes, media_type="application/pdf")
+
+        # Handle image files
+        if ext in image_extensions:
+            pdf_bytes = convert_image_to_pdf(file_bytes, ext)
+            if pdf_bytes:
+                from fastapi.responses import Response
+
+                return Response(content=pdf_bytes, media_type="application/pdf")
+            else:
+                raise HTTPException(status_code=500, detail="Image conversion failed")
+
+        # Handle document files via LibreOffice
+        if ext in convertible_extensions:
+            pdf_bytes = convert_document_to_pdf(file_bytes, filename)
+            if pdf_bytes:
+                from fastapi.responses import Response
+
+                return Response(content=pdf_bytes, media_type="application/pdf")
+            else:
+                raise HTTPException(
+                    status_code=500, detail=f"Document conversion failed for {ext} file"
+                )
+
+        # Unsupported format
+        raise HTTPException(
+            status_code=400, detail=f"File type {ext} cannot be converted to PDF"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SUBMITTAL] File-as-PDF ERROR: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def convert_image_to_pdf(image_bytes: bytes, ext: str) -> Optional[bytes]:
+    """Convert an image to PDF using PIL/Pillow."""
+    try:
+        from io import BytesIO
+        from PIL import Image
+
+        # Open image
+        img = Image.open(BytesIO(image_bytes))
+
+        # Convert to RGB if necessary (for PNG with transparency, etc.)
+        if img.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            background.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+            img = background
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        # Save as PDF
+        pdf_buffer = BytesIO()
+        img.save(pdf_buffer, format="PDF", resolution=100.0)
+        pdf_buffer.seek(0)
+
+        print(
+            f"[SUBMITTAL] Converted image to PDF ({len(pdf_buffer.getvalue())} bytes)"
+        )
+        return pdf_buffer.getvalue()
+
+    except Exception as e:
+        print(f"[SUBMITTAL] Image conversion error: {e}")
+        return None
+
+
+def convert_document_to_pdf(doc_bytes: bytes, filename: str) -> Optional[bytes]:
+    """Convert a document to PDF using LibreOffice headless."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    # Check if LibreOffice is available
+    libreoffice_path = shutil.which("libreoffice") or shutil.which("soffice")
+
+    if not libreoffice_path:
+        print("[SUBMITTAL] LibreOffice not found, cannot convert document")
+        return None
+
+    try:
+        # Create temp directory for conversion
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write input file
+            input_path = os.path.join(tmpdir, filename)
+            with open(input_path, "wb") as f:
+                f.write(doc_bytes)
+
+            # Run LibreOffice conversion
+            result = subprocess.run(
+                [
+                    libreoffice_path,
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    tmpdir,
+                    "--outdir", tmpdir,
+                    input_path,
+                ],
+                capture_output=True,
+                timeout=60,  # 60 second timeout
+            )
+
+            if result.returncode != 0:
+                print(f"[SUBMITTAL] LibreOffice error: {result.stderr.decode()}")
+                return None
+
+            # Find the output PDF
+            base_name = os.path.splitext(filename)[0]
+            output_path = os.path.join(tmpdir, f"{base_name}.pdf")
+
+            if not os.path.exists(output_path):
+                print(f"[SUBMITTAL] Output PDF not found at {output_path}")
+                return None
+
+            # Read and return the PDF
+            with open(output_path, "rb") as f:
+                pdf_bytes = f.read()
+
+            print(f"[SUBMITTAL] Converted document to PDF ({len(pdf_bytes)} bytes)")
+            return pdf_bytes
+
+    except subprocess.TimeoutExpired:
+        print("[SUBMITTAL] LibreOffice conversion timed out")
+        return None
+    except Exception as e:
+        print(f"[SUBMITTAL] Document conversion error: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════
 # RUN SERVER
 # ═══════════════════════════════════════════════════════════════
 

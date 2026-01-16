@@ -19,6 +19,34 @@ function isPDFFile(filename) {
   return filename.toLowerCase().endsWith(".pdf");
 }
 
+// File extensions that can be converted to PDF server-side
+const CONVERTIBLE_EXTENSIONS = new Set([
+  ".doc",
+  ".docx",
+  ".rtf",
+  ".txt",
+  ".odt",
+  ".xls",
+  ".xlsx",
+  ".ods",
+  ".csv",
+  ".ppt",
+  ".pptx",
+  ".odp",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".tif",
+  ".tiff",
+  ".bmp",
+]);
+
+function canConvertToPDF(filename) {
+  const ext = "." + filename.toLowerCase().split(".").pop();
+  return CONVERTIBLE_EXTENSIONS.has(ext);
+}
+
 export async function generateSubmittalPackagePDF(options) {
   const { projectName, companyName, companyLogoUrl, items, generatedDate } =
     options;
@@ -286,14 +314,16 @@ export async function generateSubmittalPackagePDF(options) {
     const files = item.submittal_package_files || [];
 
     for (const file of files) {
-      // Check if file is a PDF
-      if (!isPDFFile(file.file_name)) {
-        // Create a placeholder page for non-PDF files
-        console.warn(`[PDF] Skipping non-PDF file: ${file.file_name}`);
+      // Determine which endpoint to use
+      const isPDF = isPDFFile(file.file_name);
+      const isConvertible = canConvertToPDF(file.file_name);
+
+      // If not PDF and not convertible, show placeholder
+      if (!isPDF && !isConvertible) {
+        console.warn(`[PDF] Cannot convert file: ${file.file_name}`);
 
         const placeholderPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
-        // Header
         placeholderPage.drawText("ATTACHMENT", {
           x: 72,
           y: pageHeight - 72,
@@ -302,7 +332,6 @@ export async function generateSubmittalPackagePDF(options) {
           color: primaryColor,
         });
 
-        // File name
         placeholderPage.drawText(file.file_name, {
           x: 72,
           y: pageHeight / 2 + 20,
@@ -311,17 +340,13 @@ export async function generateSubmittalPackagePDF(options) {
           color: textColor,
         });
 
-        // Explanation
-        placeholderPage.drawText(
-          "This file type cannot be embedded in the PDF.",
-          {
-            x: 72,
-            y: pageHeight / 2 - 10,
-            size: 12,
-            font: helvetica,
-            color: mutedColor,
-          },
-        );
+        placeholderPage.drawText("This file type cannot be converted to PDF.", {
+          x: 72,
+          y: pageHeight / 2 - 10,
+          size: 12,
+          font: helvetica,
+          color: mutedColor,
+        });
 
         placeholderPage.drawText(
           "Please refer to the original uploaded file.",
@@ -334,7 +359,6 @@ export async function generateSubmittalPackagePDF(options) {
           },
         );
 
-        // File type note
         const ext = file.file_name.split(".").pop()?.toUpperCase() || "FILE";
         placeholderPage.drawText(`File type: ${ext}`, {
           x: 72,
@@ -348,8 +372,14 @@ export async function generateSubmittalPackagePDF(options) {
       }
 
       try {
-        // Fetch the PDF file from R2 via Python service
-        const fileUrl = `${API_BASE_URL}/submittal/file/${file.r2_key}`;
+        // Use conversion endpoint for non-PDFs, regular endpoint for PDFs
+        const fileUrl = isPDF
+          ? `${API_BASE_URL}/submittal/file/${file.r2_key}`
+          : `${API_BASE_URL}/submittal/file-as-pdf/${file.r2_key}`;
+
+        console.log(
+          `[PDF] Fetching ${isPDF ? "PDF" : "converted"} file: ${file.file_name}`,
+        );
         const response = await fetch(fileUrl);
 
         if (!response.ok) {
@@ -381,7 +411,11 @@ export async function generateSubmittalPackagePDF(options) {
 
         // Add a placeholder page for failed files
         const errorPage = pdfDoc.addPage([pageWidth, pageHeight]);
-        errorPage.drawText("File could not be loaded", {
+
+        const errorMsg = isPDF
+          ? "PDF could not be loaded"
+          : "File conversion failed";
+        errorPage.drawText(errorMsg, {
           x: 72,
           y: pageHeight / 2,
           size: 14,
@@ -395,6 +429,16 @@ export async function generateSubmittalPackagePDF(options) {
           font: helvetica,
           color: mutedColor,
         });
+
+        if (!isPDF) {
+          errorPage.drawText("The server could not convert this file to PDF.", {
+            x: 72,
+            y: pageHeight / 2 - 50,
+            size: 11,
+            font: helvetica,
+            color: mutedColor,
+          });
+        }
       }
     }
 
