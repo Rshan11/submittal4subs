@@ -1154,6 +1154,7 @@ def convert_image_to_pdf(image_bytes: bytes, ext: str) -> Optional[bytes]:
     """Convert an image to PDF using PIL/Pillow."""
     try:
         from io import BytesIO
+
         from PIL import Image
 
         # Open image
@@ -1185,66 +1186,203 @@ def convert_image_to_pdf(image_bytes: bytes, ext: str) -> Optional[bytes]:
 
 
 def convert_document_to_pdf(doc_bytes: bytes, filename: str) -> Optional[bytes]:
-    """Convert a document to PDF using LibreOffice headless."""
-    import shutil
-    import subprocess
-    import tempfile
+    """Convert a document to PDF using pure Python libraries."""
+    ext = os.path.splitext(filename.lower())[1]
 
-    # Check if LibreOffice is available
-    libreoffice_path = shutil.which("libreoffice") or shutil.which("soffice")
+    print(f"[SUBMITTAL] Converting {ext} file to PDF...")
 
-    if not libreoffice_path:
-        print("[SUBMITTAL] LibreOffice not found, cannot convert document")
+    if ext in (".docx", ".doc"):
+        return convert_docx_to_pdf(doc_bytes)
+    elif ext in (".xlsx", ".xls", ".csv"):
+        return convert_excel_to_pdf(doc_bytes, ext)
+    elif ext in (".txt", ".rtf"):
+        return convert_text_to_pdf(doc_bytes, ext)
+    else:
+        print(f"[SUBMITTAL] No converter available for {ext}")
         return None
 
+
+def convert_docx_to_pdf(doc_bytes: bytes) -> Optional[bytes]:
+    """Convert DOCX to PDF using python-docx and reportlab."""
     try:
-        # Create temp directory for conversion
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Write input file
-            input_path = os.path.join(tmpdir, filename)
-            with open(input_path, "wb") as f:
-                f.write(doc_bytes)
+        from io import BytesIO
+        from docx import Document
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
-            # Run LibreOffice conversion
-            result = subprocess.run(
-                [
-                    libreoffice_path,
-                    "--headless",
-                    "--convert-to",
-                    "pdf",
-                    "--outdir",
-                    tmpdir,
-                    "--outdir", tmpdir,
-                    input_path,
-                ],
-                capture_output=True,
-                timeout=60,  # 60 second timeout
-            )
+        doc = Document(BytesIO(doc_bytes))
 
-            if result.returncode != 0:
-                print(f"[SUBMITTAL] LibreOffice error: {result.stderr.decode()}")
-                return None
+        pdf_buffer = BytesIO()
+        pdf_doc = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=letter,
+            leftMargin=inch,
+            rightMargin=inch,
+            topMargin=inch,
+            bottomMargin=inch,
+        )
 
-            # Find the output PDF
-            base_name = os.path.splitext(filename)[0]
-            output_path = os.path.join(tmpdir, f"{base_name}.pdf")
+        styles = getSampleStyleSheet()
+        story = []
 
-            if not os.path.exists(output_path):
-                print(f"[SUBMITTAL] Output PDF not found at {output_path}")
-                return None
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text = (
+                    para.text.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                )
+                if para.style.name.startswith("Heading"):
+                    story.append(Paragraph(text, styles["Heading1"]))
+                else:
+                    story.append(Paragraph(text, styles["Normal"]))
+                story.append(Spacer(1, 6))
 
-            # Read and return the PDF
-            with open(output_path, "rb") as f:
-                pdf_bytes = f.read()
+        if not story:
+            story.append(Paragraph("(Empty document)", styles["Normal"]))
 
-            print(f"[SUBMITTAL] Converted document to PDF ({len(pdf_bytes)} bytes)")
-            return pdf_bytes
+        pdf_doc.build(story)
+        pdf_buffer.seek(0)
 
-    except subprocess.TimeoutExpired:
-        print("[SUBMITTAL] LibreOffice conversion timed out")
-        return None
+        print(f"[SUBMITTAL] Converted DOCX to PDF ({len(pdf_buffer.getvalue())} bytes)")
+        return pdf_buffer.getvalue()
+
     except Exception as e:
-        print(f"[SUBMITTAL] Document conversion error: {e}")
+        print(f"[SUBMITTAL] DOCX conversion error: {e}")
+        return None
+
+
+def convert_excel_to_pdf(doc_bytes: bytes, ext: str) -> Optional[bytes]:
+    """Convert Excel/CSV to PDF using openpyxl and reportlab."""
+    try:
+        from io import BytesIO, StringIO
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+
+        if ext == ".csv":
+            import csv
+
+            content = doc_bytes.decode("utf-8", errors="replace")
+            reader = csv.reader(StringIO(content))
+            data = list(reader)
+        else:
+            from openpyxl import load_workbook
+
+            wb = load_workbook(BytesIO(doc_bytes), data_only=True)
+            ws = wb.active
+            data = []
+            for row in ws.iter_rows(max_row=100, max_col=20):
+                row_data = [
+                    str(cell.value) if cell.value is not None else "" for cell in row
+                ]
+                if any(row_data):
+                    data.append(row_data)
+
+        if not data:
+            data = [["(Empty spreadsheet)"]]
+
+        pdf_buffer = BytesIO()
+        pdf_doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(letter))
+
+        max_cell_len = 50
+        for i, row in enumerate(data):
+            data[i] = [
+                cell[:max_cell_len] + "..." if len(cell) > max_cell_len else cell
+                for cell in row
+            ]
+
+        table = Table(data)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+
+        pdf_doc.build([table])
+        pdf_buffer.seek(0)
+
+        print(
+            f"[SUBMITTAL] Converted Excel/CSV to PDF ({len(pdf_buffer.getvalue())} bytes)"
+        )
+        return pdf_buffer.getvalue()
+
+    except Exception as e:
+        print(f"[SUBMITTAL] Excel conversion error: {e}")
+        return None
+
+
+def convert_text_to_pdf(doc_bytes: bytes, ext: str) -> Optional[bytes]:
+    """Convert TXT/RTF to PDF using reportlab."""
+    try:
+        from io import BytesIO
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
+        try:
+            text = doc_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            text = doc_bytes.decode("latin-1", errors="replace")
+
+        if ext == ".rtf":
+            import re
+
+            text = re.sub(r"\\[a-z]+\d*\s?", "", text)
+            text = re.sub(r"[{}]", "", text)
+            text = text.strip()
+
+        pdf_buffer = BytesIO()
+        pdf_doc = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=letter,
+            leftMargin=inch,
+            rightMargin=inch,
+            topMargin=inch,
+            bottomMargin=inch,
+        )
+
+        styles = getSampleStyleSheet()
+        story = []
+
+        paragraphs = text.split("\n\n")
+        for para in paragraphs:
+            para = para.strip()
+            if para:
+                para = (
+                    para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                )
+                story.append(Paragraph(para, styles["Normal"]))
+                story.append(Spacer(1, 6))
+
+        if not story:
+            story.append(Paragraph("(Empty document)", styles["Normal"]))
+                story.append(Spacer(1, 6))
+
+        if not story:
+            story.append(Paragraph("(Empty document)", styles['Normal']))
+
+        pdf_doc.build(story)
+        pdf_buffer.seek(0)
+
+        print(f"[SUBMITTAL] Converted text to PDF ({len(pdf_buffer.getvalue())} bytes)")
+        return pdf_buffer.getvalue()
+
+    except Exception as e:
+        print(f"[SUBMITTAL] Text conversion error: {e}")
         return None
 
 
