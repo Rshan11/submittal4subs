@@ -1295,6 +1295,27 @@ select.form-control,
     color: var(--text-secondary);
 }
 
+.sidebar-delete-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    transition:
+        opacity 0.15s,
+        color 0.15s;
+}
+
+.sidebar-item:hover .sidebar-delete-btn {
+    opacity: 1;
+}
+
+.sidebar-delete-btn:hover {
+    color: #ef4444;
+}
+
 .sidebar-empty {
     padding: 1rem;
     text-align: center;

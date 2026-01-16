@@ -386,7 +386,8 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
               <li class="sidebar-item" data-item-id="${item.id}" draggable="true">
                 <span class="drag-handle">☰</span>
                 <span class="sidebar-item-num">#${String(index + 1).padStart(3, "0")}</span>
-                <span class="sidebar-item-name">${(item.description || "Untitled").substring(0, 25)}${item.description?.length > 25 ? "..." : ""}</span>
+                <span class="sidebar-item-name">${(item.description || "Untitled").substring(0, 20)}${item.description?.length > 20 ? "..." : ""}</span>
+                <button class="sidebar-delete-btn" data-item-id="${item.id}" title="Delete">×</button>
               </li>
             `,
                 )
@@ -497,6 +498,7 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
   sidebarList?.querySelectorAll(".sidebar-item").forEach((item) => {
     item.addEventListener("click", (e) => {
       if (e.target.classList.contains("drag-handle")) return;
+      if (e.target.classList.contains("sidebar-delete-btn")) return;
 
       const itemId = item.dataset.itemId;
       const card = container.querySelector(
@@ -511,6 +513,17 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
 
       // Scroll card into view
       card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
+  // Sidebar delete buttons
+  sidebarList?.querySelectorAll(".sidebar-delete-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const itemId = btn.dataset.itemId;
+      if (confirm("Delete this item?")) {
+        onDeleteItem?.(itemId);
+      }
     });
   });
 }
