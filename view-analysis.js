@@ -201,7 +201,28 @@ function displayResults(results) {
       html += '<div class="condensed-summary">';
       html += convertMarkdownToHTML(combinedMarkdown);
       html += "</div>";
+
+      // Add submittal button at bottom if feature enabled
+      if (isSubmittalFeatureEnabled(currentUser?.id)) {
+        html += `
+          <div class="submittal-cta" style="margin-top: var(--space-lg); padding-top: var(--space-lg); border-top: 1px solid var(--border);">
+            <button class="create-submittals-btn" id="createSubmittalsBtnBottom">
+              📋 Create Submittals
+            </button>
+            <span style="margin-left: var(--space-sm); color: var(--text-muted); font-size: 13px;">
+              Generate a submittal package from this analysis
+            </span>
+          </div>
+        `;
+      }
+
       document.getElementById("resultsContent").innerHTML = html;
+
+      // Attach event listener to bottom button
+      document
+        .getElementById("createSubmittalsBtnBottom")
+        ?.addEventListener("click", handleCreateSubmittals);
+
       return;
     }
   }
