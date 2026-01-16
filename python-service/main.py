@@ -910,21 +910,34 @@ async def extract_submittals(request: ExtractSubmittalsRequest):
         print("[SUBMITTALS] ERROR: GEMINI_API_KEY not configured")
         return ExtractSubmittalsResponse(items=[], error="AI service not configured")
 
-    prompt = f"""Extract all items requiring submittals from this construction spec analysis.
+    prompt = f"""Extract ONLY physical materials and products requiring submittals from this construction spec analysis.
 Return ONLY a valid JSON array, no other text or markdown formatting:
 
 [{{"spec_section": "04 20 00", "description": "Item name", "manufacturer": "Manufacturer or empty string"}}]
 
-Include:
-- Materials with specific manufacturers (especially items marked "Basis of Design" or "Or Equal")
-- Products listed under "Quote These Items" or "Manufacturers Summary"
-- Items from "Pricing Impact Items"
-- Equipment requiring product data
-- Any item mentioning submittals, shop drawings, or product data
+INCLUDE these types of items:
+- Physical materials (CMU, concrete, steel, mortar, grout, flashing, etc.)
+- Products with specific manufacturers (especially "Basis of Design" or "Or Equal")
+- Items from "Quote These Items" or "Manufacturers Summary"
+- Equipment and fixtures requiring product data
+
+DO NOT INCLUDE administrative/procedural items such as:
+- Schedules (preliminary, full, updated, CPM schedule)
+- Certificates (insurance, hazard, compliance)
+- Request logs, proposal requests
+- Substitution requests or forms
+- Generic "shop drawings", "product data", "samples" headers
+- Closeout documents, warranties, O&M manuals
+- As-builts, record drawings
+- LEED documentation, commissioning reports
+- Test reports, inspection reports
+- Mock-ups, mockups
+- Meeting minutes, progress reports
+- Payment applications, change orders
 
 Important:
 - spec_section should be the CSI division code if known, or empty string
-- description should be a clear item name (e.g., "CMU - CarbonCure Environmental")
+- description should be a clear material/product name (e.g., "CMU - CarbonCure Environmental", "Packaged Mortar - 400 Series")
 - manufacturer should be the company name, or empty string if unknown
 
 Analysis text:
