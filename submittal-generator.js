@@ -372,18 +372,43 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
         </div>
       </div>
 
-      <div class="submittal-cards" id="submittalCards">
-        ${
-          pkg.items && pkg.items.length > 0
-            ? pkg.items
-                .map((item, index) => renderSubmittalCard(item, index))
-                .join("")
-            : `<div class="empty-state">
-              <div class="empty-state-icon">📋</div>
-              <div class="empty-state-title">No submittals yet</div>
-              <div class="empty-state-text">Click "Add Item" to create your first submittal card</div>
-            </div>`
-        }
+      <div class="submittal-layout">
+        <!-- Sidebar -->
+        <div class="submittal-sidebar">
+          <div class="sidebar-header">
+            <span>Items (${pkg.items?.length || 0})</span>
+          </div>
+          <ul class="sidebar-list" id="sidebarList">
+            ${
+              pkg.items
+                ?.map(
+                  (item, index) => `
+              <li class="sidebar-item" data-item-id="${item.id}" draggable="true">
+                <span class="drag-handle">☰</span>
+                <span class="sidebar-item-num">#${String(index + 1).padStart(3, "0")}</span>
+                <span class="sidebar-item-name">${(item.description || "Untitled").substring(0, 25)}${item.description?.length > 25 ? "..." : ""}</span>
+              </li>
+            `,
+                )
+                .join("") || '<li class="sidebar-empty">No items</li>'
+            }
+          </ul>
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="submittal-cards" id="submittalCards">
+          ${
+            pkg.items && pkg.items.length > 0
+              ? pkg.items
+                  .map((item, index) => renderSubmittalCard(item, index))
+                  .join("")
+              : `<div class="empty-state">
+                <div class="empty-state-icon">📋</div>
+                <div class="empty-state-title">No submittals yet</div>
+                <div class="empty-state-text">Click "Add Item" to create your first submittal card</div>
+              </div>`
+          }
+        </div>
       </div>
     </div>
   `;
@@ -448,6 +473,44 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
           onDeleteFile?.(fileId, r2Key);
         }
       });
+    });
+  });
+
+  // Initialize drag-and-drop on sidebar
+  const sidebarList = container.querySelector("#sidebarList");
+  if (sidebarList && window.Sortable) {
+    new Sortable(sidebarList, {
+      animation: 150,
+      handle: ".drag-handle",
+      onEnd: async (evt) => {
+        const items = [...sidebarList.querySelectorAll(".sidebar-item")];
+        for (let i = 0; i < items.length; i++) {
+          const itemId = items[i].dataset.itemId;
+          await updateSubmittalItem(itemId, { sort_order: i });
+        }
+        // Note: caller should reload package after reorder
+      },
+    });
+  }
+
+  // Click sidebar item to scroll to card
+  sidebarList?.querySelectorAll(".sidebar-item").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      if (e.target.classList.contains("drag-handle")) return;
+
+      const itemId = item.dataset.itemId;
+      const card = container.querySelector(
+        `.submittal-card[data-item-id="${itemId}"]`,
+      );
+
+      // Remove active from all, add to clicked
+      sidebarList
+        .querySelectorAll(".sidebar-item")
+        .forEach((i) => i.classList.remove("active"));
+      item.classList.add("active");
+
+      // Scroll card into view
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   });
 }
