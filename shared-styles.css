@@ -1335,7 +1335,7 @@ select.form-control,
 }
 
 .submittal-card {
-    background: var(--panel);
+    background: #1e293b;
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
     overflow: hidden;
@@ -1404,6 +1404,8 @@ select.form-control,
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
+    background: #1e293b;
+    color: #e2e8f0;
 }
 
 .submittal-field {
@@ -1415,31 +1417,33 @@ select.form-control,
 .submittal-field label {
     font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: #94a3b8;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
 .editable-field {
     font-size: 14px;
-    color: var(--text-primary);
+    color: #e2e8f0;
     padding: var(--space-xs) var(--space-sm);
-    border: 1px solid transparent;
+    border: 1px solid #334155;
     border-radius: var(--radius-sm);
     min-height: 32px;
     cursor: text;
     transition: all var(--transition-fast);
+    background: #0f172a;
 }
 
 .editable-field:hover {
-    background: var(--bg);
+    background: #334155;
 }
 
 .editable-field:focus {
     outline: none;
     border-color: var(--primary);
-    background: white;
+    background: #0f172a;
     box-shadow: 0 0 0 3px var(--primary-light);
+    color: white;
 }
 
 .editable-field:empty::before,
@@ -1450,9 +1454,9 @@ select.form-control,
 
 /* Card Files Section */
 .submittal-card-files {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid #334155;
     padding: var(--space-sm) var(--space-md);
-    background: var(--bg);
+    background: #0f172a;
 }
 
 .files-header {
@@ -1461,7 +1465,7 @@ select.form-control,
     align-items: center;
     margin-bottom: var(--space-xs);
     font-size: 12px;
-    color: var(--text-secondary);
+    color: #94a3b8;
     font-weight: 500;
 }
 
@@ -1476,7 +1480,7 @@ select.form-control,
     align-items: center;
     gap: var(--space-xs);
     padding: 6px var(--space-sm);
-    background: white;
+    background: #1e293b;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-size: 13px;
@@ -1491,12 +1495,12 @@ select.form-control,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--text-primary);
+    color: #e2e8f0;
 }
 
 .file-size {
     flex-shrink: 0;
-    color: var(--text-muted);
+    color: #64748b;
     font-size: 11px;
 }
 
@@ -1512,7 +1516,7 @@ select.form-control,
 }
 
 .no-files {
-    color: var(--text-muted);
+    color: #64748b;
     font-size: 12px;
     font-style: italic;
     padding: var(--space-xs) 0;
