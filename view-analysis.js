@@ -85,6 +85,9 @@ document
   .getElementById("downloadPdfBtn")
   ?.addEventListener("click", downloadPDF);
 document
+  .getElementById("createSubmittalsBtn")
+  ?.addEventListener("click", handleCreateSubmittals);
+document
   .getElementById("viewSubmittalsBtn")
   ?.addEventListener("click", handleViewSubmittals);
 
@@ -121,11 +124,23 @@ async function loadAnalysis() {
     currentAnalysis = data;
     displayResults(data.result);
 
-    // Show submittal button if feature enabled
+    // Show submittal buttons if feature enabled
     if (isSubmittalFeatureEnabled(currentUser?.id)) {
-      const btn = document.getElementById("viewSubmittalsBtn");
-      if (btn) {
-        btn.style.display = "inline-flex";
+      const createBtn = document.getElementById("createSubmittalsBtn");
+      const viewBtn = document.getElementById("viewSubmittalsBtn");
+
+      // Check if package already exists for this job
+      if (data.job_id) {
+        const existingPkg = await loadPackageForJob(data.job_id);
+        if (existingPkg) {
+          // Package exists - show orange "Submittals" button
+          if (viewBtn) viewBtn.style.display = "inline-flex";
+          if (createBtn) createBtn.style.display = "none";
+        } else {
+          // No package - show blue "Create Submittals" button
+          if (createBtn) createBtn.style.display = "inline-flex";
+          if (viewBtn) viewBtn.style.display = "none";
+        }
       }
     }
 
@@ -585,7 +600,7 @@ async function handleViewSubmittals() {
   }
 }
 
-// Handle the blue "Create Submittals" button at bottom of results
+// Handle the blue "Create Submittals" button
 async function handleCreateSubmittals() {
   if (!currentAnalysis || !currentUser?.id) {
     alert("No analysis available");
@@ -598,54 +613,49 @@ async function handleCreateSubmittals() {
     return;
   }
 
-  const btn = document.getElementById("createSubmittalsBtnBottom");
+  const createBtn = document.getElementById("createSubmittalsBtn");
+  const viewBtn = document.getElementById("viewSubmittalsBtn");
 
   try {
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = "⏳ Creating...";
+    if (createBtn) {
+      createBtn.disabled = true;
+      createBtn.innerHTML = "⏳ Creating...";
     }
 
-    // Check if package already exists
-    let pkg = await loadPackageForJob(jobId);
+    // Extract submittals from analysis using AI
+    const parsedItems = await extractSubmittalsFromAnalysis(
+      currentAnalysis.result,
+    );
+    console.log("[SUBMITTAL] AI extracted items:", parsedItems);
 
-    if (!pkg) {
-      // Extract submittals from analysis using AI
-      const parsedItems = await extractSubmittalsFromAnalysis(
-        currentAnalysis.result,
-      );
-      console.log("[SUBMITTAL] AI extracted items:", parsedItems);
+    // Get job name
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("job_name")
+      .eq("id", jobId)
+      .single();
 
-      // Get job name
-      const { data: job } = await supabase
-        .from("jobs")
-        .select("job_name")
-        .eq("id", jobId)
-        .single();
-
-      pkg = await createSubmittalPackage(
-        currentUser.id,
-        jobId,
-        job?.job_name || "Project",
-        parsedItems,
-      );
-    }
+    const pkg = await createSubmittalPackage(
+      currentUser.id,
+      jobId,
+      job?.job_name || "Project",
+      parsedItems,
+    );
 
     currentSubmittalPackage = await loadSubmittalPackage(pkg.id);
 
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = "📋 View Submittals";
-    }
+    // Switch buttons - hide Create, show Submittals
+    if (createBtn) createBtn.style.display = "none";
+    if (viewBtn) viewBtn.style.display = "inline-flex";
 
     showSubmittalGenerator();
   } catch (error) {
     console.error("[SUBMITTAL] Error:", error);
     alert("Failed to create submittal package: " + error.message);
 
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = "📋 Create Submittals";
+    if (createBtn) {
+      createBtn.disabled = false;
+      createBtn.innerHTML = "📋 Create Submittals";
     }
   }
 }
