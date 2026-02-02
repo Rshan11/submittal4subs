@@ -1386,8 +1386,15 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
 
         # ALSO scan page content for all division references
         # This catches outline specs where multiple divisions appear on one page
+        # AND updates the page's division_code if it's unclassified or generic (00/01)
         content_divisions = detect_all_divisions_from_content(p.get("content", ""))
         for section, content_div in content_divisions:
+            # UPDATE THE PAGE if it's unclassified or generic (00/01)
+            if p["division_code"] is None or p["division_code"] in ("00", "01"):
+                p["division_code"] = content_div
+                p["section_number"] = section
+                p["classification_method"] = "content_scan"
+
             divisions_found.add(content_div)
             sections_found.add(section)
             if content_div not in division_summary:
