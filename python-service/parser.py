@@ -261,7 +261,7 @@ def detect_division_from_content(
         return None, None
 
     if spec_format == "none":
-        return None, None
+        spec_format = "auto"
 
     # Check BOTH header (first 600 chars) and footer (last 600 chars)
     # PDF text extraction sometimes puts page footers at the START of text

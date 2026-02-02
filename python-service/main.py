@@ -153,6 +153,11 @@ class AnalyzeResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health_check():
     return {
@@ -1154,6 +1159,7 @@ def convert_image_to_pdf(image_bytes: bytes, ext: str) -> Optional[bytes]:
     """Convert an image to PDF using PIL/Pillow."""
     try:
         from io import BytesIO
+
         from PIL import Image
 
         # Open image
@@ -1214,7 +1220,8 @@ def convert_document_to_pdf(doc_bytes: bytes, filename: str) -> Optional[bytes]:
                     "pdf",
                     "--outdir",
                     tmpdir,
-                    "--outdir", tmpdir,
+                    "--outdir",
+                    tmpdir,
                     input_path,
                 ],
                 capture_output=True,
