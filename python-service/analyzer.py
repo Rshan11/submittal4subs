@@ -27,6 +27,69 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_BACKOFF_SECONDS = [2, 5, 10]  # Wait times between retries
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+async def gemini_request_with_retry(
+    payload: dict,
+    timeout: float = 120.0,
+    label: str = "Gemini",
+) -> dict:
+    """
+    Make a Gemini API request with automatic retry on transient failures.
+    Retries on 429, 500, 502, 503, 504 with exponential backoff.
+    Raises Exception on permanent failure after all retries exhausted.
+    """
+    last_error = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                    json=payload,
+                )
+
+                if response.status_code == 200:
+                    return response.json()
+
+                # Check if retryable
+                if (
+                    response.status_code in RETRYABLE_STATUS_CODES
+                    and attempt < MAX_RETRIES
+                ):
+                    wait_time = RETRY_BACKOFF_SECONDS[attempt]
+                    print(
+                        f"[{label}] API returned {response.status_code}, retrying in {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                    continue
+
+                # Non-retryable error or retries exhausted
+                raise Exception(
+                    f"{label} API error: {response.status_code} - {response.text[:500]}"
+                )
+
+        except httpx.TimeoutException:
+            if attempt < MAX_RETRIES:
+                wait_time = RETRY_BACKOFF_SECONDS[attempt]
+                print(
+                    f"[{label}] Request timed out, retrying in {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})..."
+                )
+                await asyncio.sleep(wait_time)
+                last_error = "Request timed out"
+                continue
+            raise Exception(f"{label} timed out after {MAX_RETRIES + 1} attempts")
+
+    raise Exception(
+        f"{label} failed after {MAX_RETRIES + 1} attempts. Last error: {last_error}"
+    )
+
+
 # Trade configurations
 TRADE_CONFIGS = {
     "masonry": {
@@ -128,50 +191,45 @@ INSTRUCTIONS:
 
 {base_prompt}"""
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
-            },
-        )
+    data = await gemini_request_with_retry(
+        payload={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
+        },
+        timeout=120.0,
+        label="TRADE_ANALYSIS",
+    )
 
-        if response.status_code != 200:
-            raise Exception(
-                f"Gemini API error: {response.status_code} - {response.text}"
-            )
+    result_text = (
+        data.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "")
+    )
 
-        data = response.json()
-        result_text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
+    if not result_text:
+        raise Exception("Gemini returned empty response for trade analysis")
 
-        # Validate output - check for repetition loops
-        if result_text:
-            lines = result_text.split("\n")
-            if len(lines) > 50:
-                # Check for repetition
-                seen = set()
-                unique_lines = []
-                for line in lines:
-                    line_stripped = line.strip()
-                    if line_stripped and len(line_stripped) > 20:
-                        if line_stripped in seen:
-                            continue  # Skip duplicate
-                        seen.add(line_stripped)
-                    unique_lines.append(line)
-                result_text = "\n".join(unique_lines)
+    # Validate output - check for repetition loops
+    lines = result_text.split("\n")
+    if len(lines) > 50:
+        seen = set()
+        unique_lines = []
+        for line in lines:
+            line_stripped = line.strip()
+            if line_stripped and len(line_stripped) > 20:
+                if line_stripped in seen:
+                    continue  # Skip duplicate
+                seen.add(line_stripped)
+            unique_lines.append(line)
+        result_text = "\n".join(unique_lines)
 
-        return {
-            "summary": result_text or "No extraction results",
-            "format": "markdown",
-            "trade": trade,
-            "division": division,
-        }
+    return {
+        "summary": result_text,
+        "format": "markdown",
+        "trade": trade,
+        "division": division,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -252,30 +310,29 @@ RULES:
 4. Flag anything unusual or risky
 5. Include specific dollar amounts, percentages, and timeframes"""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8000},
-            },
-        )
+    data = await gemini_request_with_retry(
+        payload={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8000},
+        },
+        timeout=60.0,
+        label="CONTRACT_ANALYSIS",
+    )
 
-        if response.status_code != 200:
-            return {"summary": "Contract analysis failed", "error": response.text}
+    result_text = (
+        data.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "")
+    )
 
-        data = response.json()
-        result_text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
+    if not result_text:
+        raise Exception("Gemini returned empty response for contract analysis")
 
-        return {
-            "summary": result_text or "No contract terms found",
-            "format": "markdown",
-        }
+    return {
+        "summary": result_text,
+        "format": "markdown",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -402,43 +459,35 @@ async def extract_section(
 SPECIFICATION CONTENT:
 {content}"""
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        response = await client.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.1,
-                    "maxOutputTokens": 8000,
-                    "responseMimeType": "application/json",
-                },
+    data = await gemini_request_with_retry(
+        payload={
+            "contents": [{"parts": [{"text": full_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 8000,
+                "responseMimeType": "application/json",
             },
-        )
+        },
+        timeout=90.0,
+        label=f"SECTION_{section_number}",
+    )
 
-        if response.status_code != 200:
-            return {
-                "section": section_number,
-                "error": f"API error: {response.status_code}",
-            }
+    result_text = (
+        data.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "{}")
+    )
 
-        data = response.json()
-        result_text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "{}")
-        )
-
-        # Parse JSON response
-        try:
-            return json.loads(result_text)
-        except json.JSONDecodeError:
-            # Try to extract JSON from response
-            return {
-                "section": section_number,
-                "raw_text": result_text[:2000],
-                "parse_error": True,
-            }
+    # Parse JSON response
+    try:
+        return json.loads(result_text)
+    except json.JSONDecodeError:
+        return {
+            "section": section_number,
+            "raw_text": result_text[:2000],
+            "parse_error": True,
+        }
 
 
 async def combine_section_results(
@@ -467,34 +516,30 @@ async def combine_section_results(
         section_results=results_text,
     )
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 16000,
-                    "responseMimeType": "application/json",
-                },
+    data = await gemini_request_with_retry(
+        payload={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 16000,
+                "responseMimeType": "application/json",
             },
-        )
+        },
+        timeout=120.0,
+        label="COMBINE_SECTIONS",
+    )
 
-        if response.status_code != 200:
-            return {"error": f"Combine API error: {response.status_code}"}
+    result_text = (
+        data.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "{}")
+    )
 
-        data = response.json()
-        result_text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "{}")
-        )
-
-        try:
-            return json.loads(result_text)
-        except json.JSONDecodeError:
-            return {"raw_combined": result_text, "parse_error": True}
+    try:
+        return json.loads(result_text)
+    except json.JSONDecodeError:
+        return {"raw_combined": result_text, "parse_error": True}
 
 
 async def format_combined_for_output(
@@ -542,25 +587,26 @@ Your job is to format it into the scannable summary format above.
 Include any conflicts or gaps that were identified during extraction.
 IMPORTANT: Check the CONTRACT TERMS section for federal funding indicators (Davis-Bacon, Buy American, DOD, etc.) and include in FUNDING & COMPLIANCE section."""
 
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        response = await client.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
-            },
-        )
+    data = await gemini_request_with_retry(
+        payload={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 16000},
+        },
+        timeout=90.0,
+        label="FORMAT_OUTPUT",
+    )
 
-        if response.status_code != 200:
-            return f"Formatting failed: {response.status_code}"
+    result_text = (
+        data.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "")
+    )
 
-        data = response.json()
-        return (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "No output generated")
-        )
+    if not result_text:
+        raise Exception("Gemini returned empty response during formatting")
+
+    return result_text
 
 
 async def analyze_division_by_section(
@@ -697,19 +743,17 @@ async def run_full_analysis(
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Handle results
-    trade_analysis = (
-        results[0]
-        if not isinstance(results[0], Exception)
-        else {
-            "summary": f"Trade analysis failed: {results[0]}",
-            "error": str(results[0]),
-        }
-    )
+    # Handle results — let trade analysis failure propagate as a real error
+    if isinstance(results[0], Exception):
+        raise results[0]
+
+    trade_analysis = results[0]
 
     contract_analysis = None
     if len(results) > 1 and not isinstance(results[1], Exception):
         contract_analysis = results[1]
+    elif len(results) > 1 and isinstance(results[1], Exception):
+        print(f"[ANALYZE] Contract analysis failed (non-fatal): {results[1]}")
 
     # Stage 2: Create executive summary
     executive_summary = None
@@ -722,7 +766,7 @@ async def run_full_analysis(
                 project_name,
             )
         except Exception as e:
-            executive_summary = f"Executive summary failed: {e}"
+            print(f"[ANALYZE] Executive summary failed (non-fatal): {e}")
 
     processing_time_ms = int((time.time() - start_time) * 1000)
 

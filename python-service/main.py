@@ -1006,62 +1006,54 @@ Analysis text:
 {request.text}"""
 
     try:
-        gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        from analyzer import gemini_request_with_retry
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{gemini_url}?key={gemini_api_key}",
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.1,
-                        "maxOutputTokens": 2048,
-                    },
+        result = await gemini_request_with_retry(
+            payload={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 2048,
                 },
+            },
+            timeout=60.0,
+            label="SUBMITTALS",
+        )
+
+        result_text = (
+            result.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+            .strip()
+        )
+
+        print(f"[SUBMITTALS] Raw AI response: {result_text[:500]}")
+
+        # Clean up response - remove markdown code blocks if present
+        if result_text.startswith("```"):
+            result_text = result_text.split("\n", 1)[1]
+            result_text = result_text.rsplit("```", 1)[0]
+
+        # Also handle ```json prefix
+        if result_text.startswith("json"):
+            result_text = result_text[4:].strip()
+
+        items = json.loads(result_text)
+        print(f"[SUBMITTALS] Extracted {len(items)} items")
+
+        # Validate and convert to proper format
+        valid_items = []
+        for item in items:
+            valid_items.append(
+                SubmittalItem(
+                    spec_section=str(item.get("spec_section", "")),
+                    description=str(item.get("description", "Unknown Item")),
+                    manufacturer=str(item.get("manufacturer", "")),
+                )
             )
 
-            if response.status_code != 200:
-                print(f"[SUBMITTALS] Gemini API error: {response.status_code}")
-                print(f"[SUBMITTALS] Response: {response.text}")
-                return ExtractSubmittalsResponse(
-                    items=[], error=f"AI API error: {response.status_code}"
-                )
-
-            result = response.json()
-            result_text = (
-                result.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-                .strip()
-            )
-
-            print(f"[SUBMITTALS] Raw AI response: {result_text[:500]}")
-
-            # Clean up response - remove markdown code blocks if present
-            if result_text.startswith("```"):
-                result_text = result_text.split("\n", 1)[1]
-                result_text = result_text.rsplit("```", 1)[0]
-
-            # Also handle ```json prefix
-            if result_text.startswith("json"):
-                result_text = result_text[4:].strip()
-
-            items = json.loads(result_text)
-            print(f"[SUBMITTALS] Extracted {len(items)} items")
-
-            # Validate and convert to proper format
-            valid_items = []
-            for item in items:
-                valid_items.append(
-                    SubmittalItem(
-                        spec_section=str(item.get("spec_section", "")),
-                        description=str(item.get("description", "Unknown Item")),
-                        manufacturer=str(item.get("manufacturer", "")),
-                    )
-                )
-
-            return ExtractSubmittalsResponse(items=valid_items)
+        return ExtractSubmittalsResponse(items=valid_items)
 
     except json.JSONDecodeError as e:
         print(f"[SUBMITTALS] JSON parse error: {e}")
