@@ -1326,13 +1326,77 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
         if not page["cross_refs"]:
             page["cross_refs"] = None
 
-    # Build classification stats
+    # Build division summary (includes content_scan reclassification)
+    divisions_found = set()
+    sections_found = set()
+    division_summary = {}
+
+    for p in pages:
+        div = p["division_code"]
+        if div:
+            divisions_found.add(div)
+            if div not in division_summary:
+                division_summary[div] = {"pages": [], "count": 0, "sections": set()}
+            division_summary[div]["pages"].append(p["page_number"])
+            division_summary[div]["count"] += 1
+            if p["section_number"]:
+                sections_found.add(p["section_number"])
+                division_summary[div]["sections"].add(p["section_number"])
+
+        # ALSO scan page content (header/footer) for division references
+        # This catches pages where the header/footer clearly identifies the section
+        # (e.g., "04 22 00 - 5") but the page was misclassified by outline/TOC
+        content_divisions = detect_all_divisions_from_content(p.get("content", ""))
+        page_reassigned = False
+        for section, content_div in content_divisions:
+            # Header/footer section IDs are authoritative - update the page
+            # if it's unclassified, generic (00/01), or assigned to a different division.
+            # Only reassign once per page (first detection wins - typically the header).
+            if not page_reassigned and p["division_code"] != content_div:
+                # Remove page from old division's summary before reassigning
+                old_div = p["division_code"]
+                if old_div and old_div in division_summary:
+                    if p["page_number"] in division_summary[old_div]["pages"]:
+                        division_summary[old_div]["pages"].remove(p["page_number"])
+                        division_summary[old_div]["count"] -= 1
+
+                p["division_code"] = content_div
+                p["section_number"] = section
+                p["classification_method"] = "content_scan"
+                page_reassigned = True
+
+            divisions_found.add(content_div)
+            sections_found.add(section)
+            if content_div not in division_summary:
+                division_summary[content_div] = {
+                    "pages": [],
+                    "count": 0,
+                    "sections": set(),
+                }
+            if p["page_number"] not in division_summary[content_div]["pages"]:
+                division_summary[content_div]["pages"].append(p["page_number"])
+                division_summary[content_div]["count"] += 1
+            division_summary[content_div]["sections"].add(section)
+
+    # Remove empty divisions (pages were reassigned away by content scan)
+    division_summary = {
+        div: info for div, info in division_summary.items() if info["count"] > 0
+    }
+    divisions_found = set(division_summary.keys())
+
+    # Convert sections set to list for JSON serialization
+    for div in division_summary:
+        division_summary[div]["sections"] = sorted(
+            list(division_summary[div]["sections"])
+        )
+
+    # Build classification stats (after content_scan reclassification for accuracy)
     classified = sum(1 for p in pages if p["division_code"])
     outline_classified = sum(
         1 for p in pages if p.get("classification_method") == "outline"
     )
     content_classified = sum(
-        1 for p in pages if p.get("classification_method") == "content"
+        1 for p in pages if p.get("classification_method") in ("content", "content_scan")
     )
     outline_plus_classified = sum(
         1 for p in pages if p.get("classification_method") == "outline+"
@@ -1366,53 +1430,6 @@ def parse_spec(pdf_bytes: bytes, spec_id: str) -> Dict[str, Any]:
     print(f"[PARSE]     - By inherit: {inherit_classified}")
     print(f"[PARSE]     - TOC/index pages (Div 00): {toc_page_classified}")
     print(f"[PARSE]   Unclassified: {unclassified}")
-
-    # Build division summary
-    divisions_found = set()
-    sections_found = set()
-    division_summary = {}
-
-    for p in pages:
-        div = p["division_code"]
-        if div:
-            divisions_found.add(div)
-            if div not in division_summary:
-                division_summary[div] = {"pages": [], "count": 0, "sections": set()}
-            division_summary[div]["pages"].append(p["page_number"])
-            division_summary[div]["count"] += 1
-            if p["section_number"]:
-                sections_found.add(p["section_number"])
-                division_summary[div]["sections"].add(p["section_number"])
-
-        # ALSO scan page content for all division references
-        # This catches outline specs where multiple divisions appear on one page
-        # AND updates the page's division_code if it's unclassified or generic (00/01)
-        content_divisions = detect_all_divisions_from_content(p.get("content", ""))
-        for section, content_div in content_divisions:
-            # UPDATE THE PAGE if it's unclassified or generic (00/01)
-            if p["division_code"] is None or p["division_code"] in ("00", "01"):
-                p["division_code"] = content_div
-                p["section_number"] = section
-                p["classification_method"] = "content_scan"
-
-            divisions_found.add(content_div)
-            sections_found.add(section)
-            if content_div not in division_summary:
-                division_summary[content_div] = {
-                    "pages": [],
-                    "count": 0,
-                    "sections": set(),
-                }
-            if p["page_number"] not in division_summary[content_div]["pages"]:
-                division_summary[content_div]["pages"].append(p["page_number"])
-                division_summary[content_div]["count"] += 1
-            division_summary[content_div]["sections"].add(section)
-
-    # Convert sections set to list for JSON serialization
-    for div in division_summary:
-        division_summary[div]["sections"] = sorted(
-            list(division_summary[div]["sections"])
-        )
 
     print(f"[PARSE] Found {len(divisions_found)} divisions:")
     for div in sorted(division_summary.keys()):
