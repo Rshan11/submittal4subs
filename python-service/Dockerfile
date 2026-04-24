@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port (Render will set PORT env var)
+# Expose port (set PORT env var or defaults to 8000)
 EXPOSE 8000
 
 # Run the application - use shell form to expand $PORT

@@ -1,6 +1,5 @@
 """
 Spec Analyzer Python Service
-Deployed on Render at submittal4subs.onrender.com
 
 Endpoints:
 - POST /upload - Upload PDF, store in R2, create spec record
@@ -21,8 +20,9 @@ from typing import List, Optional
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 # Load environment variables (check both python-service/.env and parent .env)
@@ -80,6 +80,80 @@ from storage import (
     upload_pdf,
     upload_submittal_file,
 )
+
+# ═══════════════════════════════════════════════════════════════
+# AUTH - Supabase JWT Verification
+# ═══════════════════════════════════════════════════════════════
+
+security = HTTPBearer()
+
+# Cache for verified tokens (token -> user_id, expires after 5 min)
+_token_cache: dict = {}
+_TOKEN_CACHE_TTL = 300  # 5 minutes
+
+import time
+
+
+async def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
+    """
+    Verify Supabase JWT and return user_id.
+    Uses Supabase Auth API to validate the token.
+    """
+    token = credentials.credentials
+
+    # Check cache first
+    cached = _token_cache.get(token)
+    if cached and cached["expires"] > time.time():
+        return cached["user_id"]
+
+    # Verify with Supabase Auth API
+    import httpx
+
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+
+    if not supabase_url or not supabase_key:
+        raise HTTPException(status_code=500, detail="Auth not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{supabase_url}/auth/v1/user",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "apikey": supabase_key,
+                },
+            )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        user_data = response.json()
+        user_id = user_data.get("id")
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: no user ID")
+
+        # Cache the result
+        _token_cache[token] = {
+            "user_id": user_id,
+            "expires": time.time() + _TOKEN_CACHE_TTL,
+        }
+
+        # Clean expired entries periodically
+        if len(_token_cache) > 100:
+            now = time.time()
+            expired = [k for k, v in _token_cache.items() if v["expires"] < now]
+            for k in expired:
+                del _token_cache[k]
+
+        return user_id
+
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+
 
 # ═══════════════════════════════════════════════════════════════
 # APP SETUP
@@ -180,7 +254,10 @@ async def health_check():
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_spec(
-    file: UploadFile = File(...), user_id: str = Form(...), job_id: str = Form(...)
+    file: UploadFile = File(...),
+    user_id: str = Form(...),
+    job_id: str = Form(...),
+    auth_user_id: str = Depends(verify_token),
 ):
     """
     Upload a PDF specification.
@@ -189,6 +266,10 @@ async def upload_spec(
     - Stores PDF in R2 at specs/{user_id}/{job_id}/{spec_id}.pdf
     - Creates row in specs table with status='uploaded'
     """
+    # Enforce authenticated user matches the claimed user_id
+    if user_id != auth_user_id:
+        raise HTTPException(status_code=403, detail="User ID mismatch")
+
     print(f"\n{'=' * 50}")
     print(f"[UPLOAD] New upload request")
     print(f"[UPLOAD] User: {user_id}")
@@ -204,6 +285,12 @@ async def upload_spec(
         # Read file bytes
         pdf_bytes = await file.read()
         print(f"[UPLOAD] File size: {len(pdf_bytes):,} bytes")
+
+        # Enforce 100MB size limit
+        if len(pdf_bytes) > 100 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413, detail="File too large. Maximum size is 100MB."
+            )
 
         # Generate spec_id
         spec_id = str(uuid4())
@@ -237,7 +324,7 @@ async def upload_spec(
 
 
 @app.post("/parse/{spec_id}", response_model=ParseResponse)
-async def parse_spec_endpoint(spec_id: str):
+async def parse_spec_endpoint(spec_id: str, auth_user_id: str = Depends(verify_token)):
     """
     Parse a PDF specification into pages with section tags.
 
@@ -340,7 +427,9 @@ async def parse_spec_endpoint(spec_id: str):
 
 
 @app.post("/analyze/{spec_id}", response_model=AnalyzeResponse)
-async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
+async def analyze_spec_endpoint(
+    spec_id: str, request: AnalyzeRequest, auth_user_id: str = Depends(verify_token)
+):
     """
     Run AI analysis on a specific division.
 
@@ -591,7 +680,7 @@ async def analyze_spec_endpoint(spec_id: str, request: AnalyzeRequest):
 
 
 @app.get("/spec/{spec_id}/analyses")
-async def get_spec_analyses(spec_id: str):
+async def get_spec_analyses(spec_id: str, auth_user_id: str = Depends(verify_token)):
     """
     Get all saved analyses for a spec.
     Returns list of analyses with division code, timestamp, and summary.
@@ -625,7 +714,9 @@ async def get_spec_analyses(spec_id: str):
 
 
 @app.get("/spec/{spec_id}/analysis/{division}")
-async def get_division_analysis(spec_id: str, division: str):
+async def get_division_analysis(
+    spec_id: str, division: str, auth_user_id: str = Depends(verify_token)
+):
     """
     Get saved analysis for a specific division.
     Returns the most recent analysis for that division.
@@ -660,7 +751,7 @@ async def get_division_analysis(spec_id: str, division: str):
 
 
 @app.get("/spec/{spec_id}/divisions")
-async def get_spec_divisions(spec_id: str):
+async def get_spec_divisions(spec_id: str, auth_user_id: str = Depends(verify_token)):
     """Get all divisions found in a spec using page-level data"""
     spec = get_spec(spec_id)
     if not spec:
@@ -687,7 +778,9 @@ async def get_spec_divisions(spec_id: str):
 
 
 @app.get("/spec/{spec_id}/division/{division}/related")
-async def get_division_related_sections(spec_id: str, division: str):
+async def get_division_related_sections(
+    spec_id: str, division: str, auth_user_id: str = Depends(verify_token)
+):
     """
     Get sections from OTHER divisions that are cross-referenced by this division.
 
@@ -716,7 +809,9 @@ async def get_division_related_sections(spec_id: str, division: str):
 
 
 @app.delete("/job/{job_id}")
-async def delete_job_endpoint(job_id: str, user_id: str):
+async def delete_job_endpoint(
+    job_id: str, user_id: str, auth_user_id: str = Depends(verify_token)
+):
     """
     Delete a job and all related data.
 
@@ -727,13 +822,14 @@ async def delete_job_endpoint(job_id: str, user_id: str):
 
     Requires user_id query param to verify ownership.
     """
+    # Enforce authenticated user matches the claimed user_id
+    if user_id != auth_user_id:
+        raise HTTPException(status_code=403, detail="User ID mismatch")
+
     print(f"\n{'=' * 50}")
     print(f"[DELETE] Deleting job: {job_id}")
     print(f"[DELETE] User: {user_id}")
     print(f"{'=' * 50}\n")
-
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
 
     try:
         success = delete_job(job_id, user_id)
@@ -772,6 +868,7 @@ class SubmittalDeleteRequest(BaseModel):
 async def upload_submittal(
     file: UploadFile = File(...),
     item_id: str = Form(...),
+    auth_user_id: str = Depends(verify_token),
 ):
     """
     Upload a file for a submittal package item.
@@ -819,6 +916,12 @@ async def upload_submittal(
         file_size = len(file_bytes)
         print(f"[SUBMITTAL] File size: {file_size:,} bytes")
 
+        # Enforce 100MB size limit
+        if file_size > 100 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413, detail="File too large. Maximum size is 100MB."
+            )
+
         r2_key = upload_submittal_file(item_id, file.filename, file_bytes)
         print(f"[SUBMITTAL] Uploaded to R2: {r2_key}")
 
@@ -834,7 +937,7 @@ async def upload_submittal(
 
 
 @app.get("/submittal/download/{r2_key:path}")
-async def download_submittal(r2_key: str):
+async def download_submittal(r2_key: str, auth_user_id: str = Depends(verify_token)):
     """
     Download a submittal file from R2.
     Returns the file as an attachment.
@@ -887,7 +990,7 @@ async def download_submittal(r2_key: str):
 
 
 @app.get("/submittal/file/{r2_key:path}")
-async def get_submittal_file(r2_key: str):
+async def get_submittal_file(r2_key: str, auth_user_id: str = Depends(verify_token)):
     """
     Get raw PDF bytes for a submittal file (used for PDF merging).
     Returns the file inline without Content-Disposition header.
@@ -910,7 +1013,9 @@ async def get_submittal_file(r2_key: str):
 
 
 @app.post("/submittal/delete")
-async def delete_submittal(request: SubmittalDeleteRequest):
+async def delete_submittal(
+    request: SubmittalDeleteRequest, auth_user_id: str = Depends(verify_token)
+):
     """
     Delete a submittal PDF file from R2.
     """
@@ -953,7 +1058,9 @@ class ExtractSubmittalsResponse(BaseModel):
 
 
 @app.post("/extract-submittals", response_model=ExtractSubmittalsResponse)
-async def extract_submittals(request: ExtractSubmittalsRequest):
+async def extract_submittals(
+    request: ExtractSubmittalsRequest, auth_user_id: str = Depends(verify_token)
+):
     """
     Extract submittal items from analysis text using Gemini AI.
     Returns structured list of items requiring submittals.
@@ -1069,7 +1176,9 @@ Analysis text:
 
 
 @app.get("/submittal/file-as-pdf/{r2_key:path}")
-async def get_submittal_file_as_pdf(r2_key: str):
+async def get_submittal_file_as_pdf(
+    r2_key: str, auth_user_id: str = Depends(verify_token)
+):
     """
     Get a submittal file as PDF. If it's already a PDF, return as-is.
     If it's a convertible format (doc, docx, rtf, etc.), convert to PDF first.
