@@ -2,6 +2,16 @@
 // Creates cover sheet, TOC, dividers, and merges content PDFs
 
 import { API_BASE_URL } from "./lib/api.js";
+import { supabase } from "./lib/supabase.js";
+
+async function getAuthHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
+}
 
 // We'll use pdf-lib for PDF manipulation
 // Make sure to add: npm install pdf-lib
@@ -78,7 +88,8 @@ export async function generateSubmittalPackagePDF(options) {
   if (companyLogoUrl) {
     try {
       // Fetch and embed logo
-      const logoResponse = await fetch(companyLogoUrl);
+      const auth = await getAuthHeaders();
+      const logoResponse = await fetch(companyLogoUrl, { headers: auth });
       const logoBytes = await logoResponse.arrayBuffer();
       const logoImage = await pdfDoc
         .embedPng(logoBytes)
@@ -380,7 +391,8 @@ export async function generateSubmittalPackagePDF(options) {
         console.log(
           `[PDF] Fetching ${isPDF ? "PDF" : "converted"} file: ${file.file_name}`,
         );
-        const response = await fetch(fileUrl);
+        const auth = await getAuthHeaders();
+        const response = await fetch(fileUrl, { headers: auth });
 
         if (!response.ok) {
           console.warn(

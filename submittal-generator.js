@@ -3,6 +3,16 @@
 
 import { supabase } from "./lib/supabase.js";
 import { API_BASE_URL } from "./lib/api.js";
+
+async function getAuthHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error("Not authenticated. Please log in again.");
+  }
+  return { Authorization: `Bearer ${session.access_token}` };
+}
 import { generateSubmittalPackagePDF } from "./submittal-pdf.js";
 
 // Feature flag - only show for specific users during development
@@ -234,8 +244,10 @@ export async function uploadSubmittalFile(itemId, file) {
     formData.append("file", file);
     formData.append("item_id", itemId);
 
+    const auth = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/submittal/upload`, {
       method: "POST",
+      headers: auth,
       body: formData,
     });
 
@@ -282,9 +294,10 @@ export async function uploadSubmittalFile(itemId, file) {
 export async function deleteSubmittalFile(fileId, r2Key) {
   try {
     // Delete from R2 via Python service
+    const auth = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/submittal/delete`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ r2_key: r2Key }),
     });
 
@@ -367,9 +380,10 @@ export async function extractSubmittalsFromAnalysis(analysisResult) {
   console.log("[SUBMITTAL] Text length for AI extraction:", text.length);
 
   try {
+    const auth = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/extract-submittals`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
 
