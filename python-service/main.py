@@ -245,6 +245,9 @@ async def health_check():
         "status": "healthy",
         "version": "3.0.0",
         "architecture": "page-level",
+        # Exposed so a deploy is verifiable from outside: if this key is absent,
+        # the running build predates it regardless of what the dashboard says.
+        "max_upload_mb": MAX_UPLOAD_MB,
         "services": {
             "supabase": bool(os.getenv("SUPABASE_URL")),
             "r2": bool(os.getenv("R2_ACCOUNT_ID")),
