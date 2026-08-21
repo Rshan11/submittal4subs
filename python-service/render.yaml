@@ -3,7 +3,10 @@ services:
     name: spec-analyzer-api
     env: docker
     region: oregon
-    plan: starter
+    # Instance type, not the workspace plan. Starter (0.5 CPU / 512 MB) could not
+    # hold a large spec PDF in memory: /parse buffers the whole file, PyMuPDF
+    # copies it again, and every page's text stays live until insert_pages_batch.
+    plan: standard
     dockerfilePath: ./Dockerfile
     envVars:
       - key: SUPABASE_URL

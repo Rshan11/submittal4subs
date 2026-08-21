@@ -468,7 +468,6 @@ def insert_analysis(
         "analysis_type": analysis_type,
         "result": result,
         "processing_time_ms": processing_time_ms,
-        "processing_time_ms": processing_time_ms,
     }
 
     result_data = client.table("spec_analyses").insert(data).execute()

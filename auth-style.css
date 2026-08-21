@@ -143,6 +143,44 @@ body {
     color: var(--text-muted);
 }
 
+/* Password show/hide toggle */
+.password-field {
+    position: relative;
+}
+
+/* Keep typed characters clear of the toggle button */
+.password-field .form-input {
+    padding-right: 68px;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    transform: translateY(-50%);
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius-btn);
+    background: transparent;
+    font-family: "Manrope", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+}
+
+.password-toggle:hover {
+    color: var(--primary);
+}
+
+.password-toggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+    color: var(--primary);
+}
+
 .btn-submit {
     width: 100%;
     padding: var(--space-sm) var(--space-md);

@@ -47,6 +47,13 @@ if not os.getenv("GEMINI_API_KEY"):
 if not os.getenv("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = get_env("OPENAI_API_KEY")
 
+# Max upload size. No limit existed before the self-host prep commit (bb7dbb9),
+# which hardcoded 100MB - well under what real spec books run. The practical
+# ceiling is instance RAM, since /upload and /parse both buffer the whole file,
+# so this is env-tunable rather than baked in: raise it with the instance type.
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "750"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 # Import our modules
 from analyzer import (
     TRADE_CONFIGS,
@@ -286,10 +293,12 @@ async def upload_spec(
         pdf_bytes = await file.read()
         print(f"[UPLOAD] File size: {len(pdf_bytes):,} bytes")
 
-        # Enforce 100MB size limit
-        if len(pdf_bytes) > 100 * 1024 * 1024:
+        # Enforce size limit (see MAX_UPLOAD_MB)
+        if len(pdf_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(
-                status_code=413, detail="File too large. Maximum size is 100MB."
+                status_code=413,
+                detail=f"File too large ({len(pdf_bytes) / 1024 / 1024:.0f}MB). "
+                f"Maximum size is {MAX_UPLOAD_MB}MB.",
             )
 
         # Generate spec_id
@@ -916,10 +925,12 @@ async def upload_submittal(
         file_size = len(file_bytes)
         print(f"[SUBMITTAL] File size: {file_size:,} bytes")
 
-        # Enforce 100MB size limit
-        if file_size > 100 * 1024 * 1024:
+        # Enforce size limit (see MAX_UPLOAD_MB)
+        if file_size > MAX_UPLOAD_BYTES:
             raise HTTPException(
-                status_code=413, detail="File too large. Maximum size is 100MB."
+                status_code=413,
+                detail=f"File too large ({file_size / 1024 / 1024:.0f}MB). "
+                f"Maximum size is {MAX_UPLOAD_MB}MB.",
             )
 
         r2_key = upload_submittal_file(item_id, file.filename, file_bytes)

@@ -35,7 +35,47 @@ document.addEventListener("DOMContentLoaded", async function () {
       signupForm.style.display = "block";
       loginForm.style.display = "none";
     }
+    hideAllPasswords();
     hideMessage();
+  }
+
+  // Password show/hide toggles
+  const passwordToggles = document.querySelectorAll("[data-toggle-password]");
+
+  passwordToggles.forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      const input = document.getElementById(toggle.dataset.togglePassword);
+      if (!input) return;
+
+      const reveal = input.type === "password";
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+
+      setToggleState(toggle, input, reveal);
+
+      // Changing type resets the caret, so put it back where they were typing
+      input.focus({ preventScroll: true });
+      try {
+        input.setSelectionRange(start, end);
+      } catch {
+        // Some browsers refuse setSelectionRange on password inputs
+      }
+    });
+  });
+
+  function setToggleState(toggle, input, reveal) {
+    input.type = reveal ? "text" : "password";
+    toggle.textContent = reveal ? "Hide" : "Show";
+    toggle.setAttribute("aria-pressed", String(reveal));
+    toggle.setAttribute("aria-label", reveal ? "Hide password" : "Show password");
+  }
+
+  // Never leave a password revealed on a form the user has navigated away from
+  function hideAllPasswords() {
+    passwordToggles.forEach((toggle) => {
+      const input = document.getElementById(toggle.dataset.togglePassword);
+      if (input) setToggleState(toggle, input, false);
+    });
   }
 
   // Login form handler
@@ -81,13 +121,16 @@ document.addEventListener("DOMContentLoaded", async function () {
     const displayName = document
       .getElementById("signupDisplayName")
       .value.trim();
+    const companyName = document
+      .getElementById("signupCompanyName")
+      .value.trim();
     const email = document.getElementById("signupEmail").value.trim();
     const password = document.getElementById("signupPassword").value;
     const confirmPassword = document.getElementById(
       "signupPasswordConfirm",
     ).value;
 
-    if (!displayName || !email || !password || !confirmPassword) {
+    if (!displayName || !companyName || !email || !password || !confirmPassword) {
       showMessage("Please fill in all fields", "error");
       return;
     }
@@ -111,7 +154,14 @@ document.addEventListener("DOMContentLoaded", async function () {
       options: {
         emailRedirectTo: `${window.location.origin}/dashboard.html`,
         data: {
+          // handle_new_user() reads full_name and company_name. display_name is
+          // kept for back-compat with accounts created before this change.
+          full_name: displayName,
           display_name: displayName,
+          company_name: companyName,
+          // Tells the trigger not to build a companies/memberships row - the
+          // spec analyzer is single-user per account.
+          app: "spec-analyzer",
         },
       },
     });

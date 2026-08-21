@@ -375,8 +375,16 @@ async function loadRelatedSections(divisionCode) {
   }
 
   try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     const response = await fetch(
       `${API_BASE_URL}/spec/${currentSpecId}/division/${divisionCode}/related`,
+      {
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : {},
+      },
     );
 
     if (!response.ok) {
@@ -527,12 +535,28 @@ function populateDivisionDropdown(divisions) {
   });
 }
 
+// Keep in sync with MAX_UPLOAD_MB in python-service/main.py. Checking here means
+// an oversized file fails instantly instead of after a full upload to Render.
+const MAX_UPLOAD_MB = 750;
+
+function checkFile(file, verb) {
+  if (!file || file.type !== "application/pdf") {
+    showError(`Please ${verb} a valid PDF file`);
+    return false;
+  }
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    showError(
+      `That file is ${formatFileSize(file.size)}. The maximum is ${MAX_UPLOAD_MB} MB.`,
+    );
+    return false;
+  }
+  return true;
+}
+
 function handleFileSelect(e) {
   const file = e.target.files[0];
-  if (file && file.type === "application/pdf") {
+  if (checkFile(file, "select")) {
     displayFileInfo(file);
-  } else {
-    showError("Please select a valid PDF file");
   }
 }
 
@@ -554,10 +578,8 @@ function handleDrop(e) {
   uploadBox.classList.remove("dragover");
 
   const file = e.dataTransfer.files[0];
-  if (file && file.type === "application/pdf") {
+  if (checkFile(file, "drop")) {
     displayFileInfo(file);
-  } else {
-    showError("Please drop a valid PDF file");
   }
 }
 
