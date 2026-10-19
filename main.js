@@ -1841,7 +1841,20 @@ async function showSubmittalGenerator() {
         alert("Submittal package generated and downloaded!");
       } catch (error) {
         document.querySelector(".submittal-loading-overlay")?.remove();
-        showError("Failed to generate package: " + error.message);
+        // Keep the package and upload controls available so attachments can be fixed.
+        submittalSection.style.display = "block";
+        if (errorSection) errorSection.style.display = "none";
+        let warning = submittalSection.querySelector("#submittalWarnings");
+        if (!warning) {
+          warning = document.createElement("div");
+          warning.id = "submittalWarnings";
+          warning.className = "alert alert-warning";
+          warning.setAttribute("role", "alert");
+          submittalSection.prepend(warning);
+        }
+        warning.textContent = "Failed to generate package: " +
+          (error?.message || "Check the attachments and try again.");
+        warning.hidden = false;
       }
     },
   });
