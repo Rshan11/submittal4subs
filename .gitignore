@@ -3,3 +3,7 @@ node_modules/
 dist/
 .DS_Store
 __pycache__/
+.npm-cache/
+tests/*.log
+*.local.txt
+*.local.json

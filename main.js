@@ -1,7 +1,7 @@
 // Main application logic for Spec Analyzer - Python API Version
 import { generateAndDownloadPDF } from "./pdf-generator.js";
 import { supabase } from "./lib/supabase.js";
-import { uploadSpec, parseSpec, analyzeSpec, API_BASE_URL } from "./lib/api.js";
+import { uploadSpec, parseSpec, analyzeSpec, getRelatedSections } from "./lib/api.js";
 import {
   isSubmittalFeatureEnabled,
   createSubmittalPackage,
@@ -375,24 +375,7 @@ async function loadRelatedSections(divisionCode) {
   }
 
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const response = await fetch(
-      `${API_BASE_URL}/spec/${currentSpecId}/division/${divisionCode}/related`,
-      {
-        headers: session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : {},
-      },
-    );
-
-    if (!response.ok) {
-      container.style.display = "none";
-      return;
-    }
-
-    const data = await response.json();
+    const data = await getRelatedSections(currentSpecId, divisionCode);
     const related = data.related_sections || [];
 
     if (related.length === 0) {

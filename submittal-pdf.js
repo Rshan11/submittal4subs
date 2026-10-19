@@ -1,17 +1,7 @@
 // Submittal Package PDF Generator
 // Creates cover sheet, TOC, dividers, and merges content PDFs
 
-import { API_BASE_URL } from "./lib/api.js";
-import { supabase } from "./lib/supabase.js";
-
-async function getAuthHeaders() {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.access_token
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
-}
+import { fetchSubmittalFile } from "./lib/api.js";
 
 // We'll use pdf-lib for PDF manipulation
 // Make sure to add: npm install pdf-lib
@@ -58,8 +48,30 @@ function canConvertToPDF(filename) {
 }
 
 export async function generateSubmittalPackagePDF(options) {
-  const { projectName, companyName, companyLogoUrl, items, generatedDate } =
+  const { projectName, companyName, companyLogoUrl, logoOmitted, items, generatedDate,
+    onWarning = (message) => globalThis.alert?.(message) } =
     options;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("Add submittal items and attachments before combining the package.");
+  }
+  for (const item of items) {
+    const files = item.submittal_package_files;
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error("Every submittal item needs an attachment before the package can be complete.");
+    }
+    for (const file of files) {
+      if (typeof file.file_name !== "string" || !file.r2_key ||
+          (!isPDFFile(file.file_name) && !canConvertToPDF(file.file_name))) {
+        throw new Error(`Attachment ${file.file_name || "(unnamed)"} cannot be included. Upload a PDF or supported document before combining.`);
+      }
+    }
+  }
+  // Logos are not linked submittal items. Never fetch them through that protected
+  // route, or send a bearer token to an arbitrary profile-provided URL.
+  if (companyLogoUrl || logoOmitted) {
+    onWarning("Company logo omitted: secure logo downloads are not supported yet. All submittal attachments are still required.");
+  }
 
   // Dynamically import pdf-lib (works with bundler or CDN)
   const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
@@ -77,41 +89,11 @@ export async function generateSubmittalPackagePDF(options) {
   const primaryColor = rgb(21 / 255, 84 / 255, 161 / 255); // PM4Subs blue
   const textColor = rgb(31 / 255, 41 / 255, 55 / 255);
   const mutedColor = rgb(107 / 255, 114 / 255, 128 / 255);
-  const warningColor = rgb(0.7, 0.5, 0.1);
 
   // ============================================
   // COVER SHEET
   // ============================================
   const coverPage = pdfDoc.addPage([pageWidth, pageHeight]);
-
-  // Company logo placeholder (top center)
-  if (companyLogoUrl) {
-    try {
-      // Fetch and embed logo
-      const auth = await getAuthHeaders();
-      const logoResponse = await fetch(companyLogoUrl, { headers: auth });
-      const logoBytes = await logoResponse.arrayBuffer();
-      const logoImage = await pdfDoc
-        .embedPng(logoBytes)
-        .catch(() => pdfDoc.embedJpg(logoBytes));
-
-      const logoMaxWidth = 200;
-      const logoMaxHeight = 80;
-      const logoScale = Math.min(
-        logoMaxWidth / logoImage.width,
-        logoMaxHeight / logoImage.height,
-      );
-
-      coverPage.drawImage(logoImage, {
-        x: (pageWidth - logoImage.width * logoScale) / 2,
-        y: pageHeight - 120,
-        width: logoImage.width * logoScale,
-        height: logoImage.height * logoScale,
-      });
-    } catch (err) {
-      console.warn("[PDF] Could not embed logo:", err);
-    }
-  }
 
   // Title
   const title = "SUBMITTAL PACKAGE";
@@ -321,152 +303,22 @@ export async function generateSubmittalPackagePDF(options) {
       });
     }
 
-    // --- CONTENT PAGES (merge PDFs or show placeholder for non-PDFs) ---
-    const files = item.submittal_package_files || [];
-
-    for (const file of files) {
-      // Determine which endpoint to use
-      const isPDF = isPDFFile(file.file_name);
-      const isConvertible = canConvertToPDF(file.file_name);
-
-      // If not PDF and not convertible, show placeholder
-      if (!isPDF && !isConvertible) {
-        console.warn(`[PDF] Cannot convert file: ${file.file_name}`);
-
-        const placeholderPage = pdfDoc.addPage([pageWidth, pageHeight]);
-
-        placeholderPage.drawText("ATTACHMENT", {
-          x: 72,
-          y: pageHeight - 72,
-          size: 14,
-          font: helveticaBold,
-          color: primaryColor,
-        });
-
-        placeholderPage.drawText(file.file_name, {
-          x: 72,
-          y: pageHeight / 2 + 20,
-          size: 16,
-          font: helveticaBold,
-          color: textColor,
-        });
-
-        placeholderPage.drawText("This file type cannot be converted to PDF.", {
-          x: 72,
-          y: pageHeight / 2 - 10,
-          size: 12,
-          font: helvetica,
-          color: mutedColor,
-        });
-
-        placeholderPage.drawText(
-          "Please refer to the original uploaded file.",
-          {
-            x: 72,
-            y: pageHeight / 2 - 30,
-            size: 12,
-            font: helvetica,
-            color: mutedColor,
-          },
-        );
-
-        const ext = file.file_name.split(".").pop()?.toUpperCase() || "FILE";
-        placeholderPage.drawText(`File type: ${ext}`, {
-          x: 72,
-          y: pageHeight / 2 - 60,
-          size: 11,
-          font: helvetica,
-          color: warningColor,
-        });
-
-        continue;
-      }
-
+    // Every attachment must load and merge successfully before save/completion.
+    for (const file of item.submittal_package_files) {
       try {
-        // Use conversion endpoint for non-PDFs, regular endpoint for PDFs
-        const fileUrl = isPDF
-          ? `${API_BASE_URL}/submittal/file/${file.r2_key}`
-          : `${API_BASE_URL}/submittal/file-as-pdf/${file.r2_key}`;
-
-        console.log(
-          `[PDF] Fetching ${isPDF ? "PDF" : "converted"} file: ${file.file_name}`,
-        );
-        const auth = await getAuthHeaders();
-        const response = await fetch(fileUrl, { headers: auth });
-
-        if (!response.ok) {
-          console.warn(
-            `[PDF] Could not download file ${file.file_name}: ${response.status}`,
-          );
-          continue;
-        }
-
-        // Load the PDF
+        const response = await fetchSubmittalFile(file.r2_key, {
+          convertToPdf: !isPDFFile(file.file_name),
+        });
         const fileBytes = await response.arrayBuffer();
         const externalPdf = await PDFDocument.load(fileBytes);
-
-        // Copy all pages from the external PDF
-        const copiedPages = await pdfDoc.copyPages(
-          externalPdf,
-          externalPdf.getPageIndices(),
-        );
-
-        copiedPages.forEach((page) => {
-          pdfDoc.addPage(page);
-        });
-
-        console.log(
-          `[PDF] Added ${copiedPages.length} pages from ${file.file_name}`,
-        );
-      } catch (err) {
-        console.warn(`[PDF] Error processing file ${file.file_name}:`, err);
-
-        // Add a placeholder page for failed files
-        const errorPage = pdfDoc.addPage([pageWidth, pageHeight]);
-
-        const errorMsg = isPDF
-          ? "PDF could not be loaded"
-          : "File conversion failed";
-        errorPage.drawText(errorMsg, {
-          x: 72,
-          y: pageHeight / 2,
-          size: 14,
-          font: helvetica,
-          color: rgb(0.8, 0.2, 0.2),
-        });
-        errorPage.drawText(file.file_name, {
-          x: 72,
-          y: pageHeight / 2 - 24,
-          size: 12,
-          font: helvetica,
-          color: mutedColor,
-        });
-
-        if (!isPDF) {
-          errorPage.drawText("The server could not convert this file to PDF.", {
-            x: 72,
-            y: pageHeight / 2 - 50,
-            size: 11,
-            font: helvetica,
-            color: mutedColor,
-          });
-        }
+        const indices = externalPdf.getPageIndices();
+        if (indices.length === 0) throw new Error("The attachment PDF is empty.");
+        const copiedPages = await pdfDoc.copyPages(externalPdf, indices);
+        if (copiedPages.length !== indices.length) throw new Error("Attachment pages were missing.");
+        copiedPages.forEach((page) => pdfDoc.addPage(page));
+      } catch (error) {
+        throw new Error(`Could not include attachment "${file.file_name}". The package was not completed. ${error.message || "Please retry."}`);
       }
-    }
-
-    // If no files, add a placeholder page
-    if (files.length === 0) {
-      const placeholderPage = pdfDoc.addPage([pageWidth, pageHeight]);
-      placeholderPage.drawText("No documents attached", {
-        x:
-          (pageWidth -
-            helvetica.widthOfTextAtSize("No documents attached", 14)) /
-          2,
-        y: pageHeight / 2,
-        size: 14,
-        font: helvetica,
-        color: mutedColor,
-      });
     }
   }
 

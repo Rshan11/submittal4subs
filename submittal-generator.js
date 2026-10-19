@@ -2,18 +2,14 @@
 // Handles creating submittal packages from spec analysis results
 
 import { supabase } from "./lib/supabase.js";
-import { API_BASE_URL } from "./lib/api.js";
-
-async function getAuthHeaders() {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) {
-    throw new Error("Not authenticated. Please log in again.");
-  }
-  return { Authorization: `Bearer ${session.access_token}` };
-}
+import { API_BASE_URL, getAuthHeaders, fetchSubmittalFile } from "./lib/api.js";
 import { generateSubmittalPackagePDF } from "./submittal-pdf.js";
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+  })[character]);
+}
 
 // Feature flag - only show for specific users during development
 const SUBMITTAL_FEATURE_USERS = [
@@ -248,6 +244,7 @@ export async function uploadSubmittalFile(itemId, file) {
     const response = await fetch(`${API_BASE_URL}/submittal/upload`, {
       method: "POST",
       headers: auth,
+      redirect: "error",
       body: formData,
     });
 
@@ -298,18 +295,24 @@ export async function deleteSubmittalFile(fileId, r2Key) {
     const response = await fetch(`${API_BASE_URL}/submittal/delete`, {
       method: "POST",
       headers: { ...auth, "Content-Type": "application/json" },
+      redirect: "error",
       body: JSON.stringify({ r2_key: r2Key }),
     });
 
     if (!response.ok) {
-      console.warn("[SUBMITTAL] R2 delete failed, continuing with DB cleanup");
+      throw new Error(`Storage deletion failed (${response.status}). The file record was kept; please retry.`);
+    }
+    const deleted = await response.json();
+    if (deleted?.status !== "deleted" || deleted.r2_key !== r2Key) {
+      throw new Error("Storage deletion was not confirmed. The file record was kept.");
     }
 
     // Delete record from Supabase
     const { error } = await supabase
       .from("submittal_package_files")
       .delete()
-      .eq("id", fileId);
+      .eq("id", fileId)
+      .eq("r2_key", r2Key);
 
     if (error) throw error;
   } catch (error) {
@@ -332,9 +335,40 @@ export async function reorderSubmittalFile(fileId, newSortOrder) {
   }
 }
 
-// Helper to get file download URL
-export function getSubmittalFileUrl(r2Key) {
-  return `${API_BASE_URL}/submittal/file/${r2Key}`;
+// Caller must revoke the returned local blob URL, not open a protected API href.
+export async function getSubmittalFileUrl(r2Key) {
+  const response = await fetchSubmittalFile(r2Key, { download: true });
+  const blob = await response.blob();
+  if (!blob.size) throw new Error("The downloaded attachment was empty.");
+  return URL.createObjectURL(blob);
+}
+
+function downloadBlobUrl(url, filename) {
+  let link;
+  try {
+    link = document.createElement("a");
+    link.href = url;
+    link.download = String(filename || "attachment").replace(/[\\/\x00-\x1f\x7f]/g, "_");
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link?.remove();
+    // Safari can start consuming a blob after click returns.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+}
+
+export async function downloadSubmittalFile(r2Key, filename) {
+  downloadBlobUrl(await getSubmittalFileUrl(r2Key), filename);
+}
+
+function showSubmittalWarning(message, acknowledge = false) {
+  const notice = document.getElementById("submittalWarnings");
+  if (notice) {
+    notice.textContent = message;
+    notice.hidden = false;
+  }
+  if (!notice || acknowledge) globalThis.alert?.(message);
 }
 
 // ============================================
@@ -384,26 +418,25 @@ export async function extractSubmittalsFromAnalysis(analysisResult) {
     const response = await fetch(`${API_BASE_URL}/extract-submittals`, {
       method: "POST",
       headers: { ...auth, "Content-Type": "application/json" },
+      redirect: "error",
       body: JSON.stringify({ text }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("[SUBMITTAL] AI extraction failed:", errorData);
-      return [];
+      throw new Error(`Submittal extraction failed (${response.status}). Please retry.`);
     }
 
     const data = await response.json();
     console.log("[SUBMITTAL] AI extracted items:", data.items);
 
     if (data.error) {
-      console.warn("[SUBMITTAL] AI extraction warning:", data.error);
+      throw new Error("Submittal extraction failed. Please retry.");
     }
 
     return data.items || [];
   } catch (error) {
     console.error("[SUBMITTAL] AI extraction error:", error);
-    return [];
+    throw error;
   }
 }
 
@@ -446,6 +479,7 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
         </div>
       </div>
 
+      <div id="submittalWarnings" class="alert alert-warning" role="status" aria-live="polite" hidden></div>
       <div class="submittal-layout">
         <!-- Sidebar -->
         <div class="submittal-sidebar">
@@ -544,6 +578,20 @@ export function renderSubmittalGenerator(container, pkg, callbacks = {}) {
       const files = Array.from(e.target.files);
       files.forEach((file) => onUploadFile?.(itemId, file));
       e.target.value = ""; // Reset
+    });
+
+    card.querySelectorAll(".download-file-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        btn.disabled = true;
+        try {
+          await downloadSubmittalFile(btn.dataset.r2Key, btn.dataset.fileName);
+        } catch (error) {
+          showSubmittalWarning(error.message || "Attachment download failed.");
+        } finally {
+          btn.disabled = false;
+        }
+      });
     });
 
     // Delete files
@@ -697,21 +745,21 @@ function renderSubmittalCard(item, index) {
         <div class="submittal-field">
           <label>Spec Section</label>
           <div class="editable-field" data-field="spec_section" contenteditable="true">
-            ${item.spec_section || "Click to add section"}
+            ${escapeHtml(item.spec_section) || "Click to add section"}
           </div>
         </div>
 
         <div class="submittal-field">
           <label>Description</label>
           <div class="editable-field" data-field="description" contenteditable="true">
-            ${item.description || "Click to add description"}
+            ${escapeHtml(item.description) || "Click to add description"}
           </div>
         </div>
 
         <div class="submittal-field">
           <label>Manufacturer</label>
           <div class="editable-field" data-field="manufacturer" contenteditable="true">
-            ${item.manufacturer || "Click to add manufacturer"}
+            ${escapeHtml(item.manufacturer) || "Click to add manufacturer"}
           </div>
         </div>
       </div>
@@ -741,11 +789,13 @@ function renderSubmittalCard(item, index) {
                       : ""
                   }
                   <span class="file-icon">📄</span>
-                  <span class="file-name">${f.file_name}</span>
+                  <button type="button" class="btn btn-ghost file-name download-file-btn"
+                          data-r2-key="${escapeHtml(f.r2_key)}" data-file-name="${escapeHtml(f.file_name)}"
+                          title="Download attachment">${escapeHtml(f.file_name)}</button>
                   <span class="file-size">${formatFileSize(f.file_size)}</span>
                   <button class="btn btn-ghost btn-sm delete-file-btn"
                           data-file-id="${f.id}"
-                          data-r2-key="${f.r2_key}"
+                          data-r2-key="${escapeHtml(f.r2_key)}"
                           title="Remove file">×</button>
                 </div>
               `,
@@ -778,11 +828,12 @@ export async function combineSubmittalPackage(pkg, userProfile) {
     const fullPkg = await loadSubmittalPackage(pkg.id);
 
     // Get job name
-    const { data: job } = await supabase
+    const { data: job, error: jobError } = await supabase
       .from("jobs")
       .select("job_name")
       .eq("id", fullPkg.job_id)
       .single();
+    if (jobError) throw jobError;
 
     // Get company name from profile - try multiple possible field names
     const companyName =
@@ -791,36 +842,31 @@ export async function combineSubmittalPackage(pkg, userProfile) {
       userProfile?.company ||
       "Company Name";
 
-    // Get company logo URL if available
-    let companyLogoUrl = null;
-    if (userProfile?.company_logo_r2_key) {
-      companyLogoUrl = `${API_BASE_URL}/submittal/file/${userProfile.company_logo_r2_key}`;
-    }
-
     // Generate PDF
     const pdfBlob = await generateSubmittalPackagePDF({
       projectName: job?.job_name || "Project",
       companyName: companyName,
-      companyLogoUrl: companyLogoUrl,
+      logoOmitted: Boolean(userProfile?.company_logo_r2_key),
+      onWarning: (message) => showSubmittalWarning(message, true),
       items: fullPkg.items,
       generatedDate: new Date().toISOString(),
     });
 
     // Update package status
-    await supabase
+    const { data: completed, error: completeError } = await supabase
       .from("submittal_packages")
       .update({ status: "complete" })
-      .eq("id", pkg.id);
+      .eq("id", pkg.id)
+      .select("id, status")
+      .single();
+    if (completeError) throw completeError;
+    if (completed?.id !== pkg.id || completed.status !== "complete") {
+      throw new Error("Package completion could not be confirmed. Please retry.");
+    }
 
     // Download the PDF
     const url = URL.createObjectURL(pdfBlob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${job?.job_name || "Submittal"}_Package.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlobUrl(url, `${job?.job_name || "Submittal"}_Package.pdf`);
 
     console.log("[SUBMITTAL] Package combined successfully");
     return true;
