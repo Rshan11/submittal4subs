@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
+import { publicSupabaseKeyGuard } from './build/public-supabase-key.js'
 
 export default defineConfig({
+  plugins: [publicSupabaseKeyGuard()],
   server: {
     port: 5173,
     open: false // Don't auto-open browser
